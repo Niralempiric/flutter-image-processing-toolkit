@@ -55,6 +55,40 @@ Omit `outputFormat` to use the supported source format. Omit `outputDirectory` t
 
 Android and iOS are supported through `flutter_image_compress`. Codec availability, notably HEIC and WebP output, depends on the platform and device; requests unavailable on the current device fail with `compressionFailed`. Files are validated by extension before native decoding, so a corrupt file with a supported extension may still fail during native compression. A failed operation leaves nothing behind: a partial or empty file written by the codec is removed, and the source file is never deleted, even if the codec reports the source as its own output. An empty codec output is reported as `compressionFailed` rather than as a result claiming 100% saved. The package does not target web, macOS, Windows, or Linux in this release.
 
+### Codec capability matrix
+
+Every entry below was measured on a physical device; nothing here is inferred.
+Rows are the input file format, columns the requested `outputFormat`.
+
+| Source | *(none: keep source)* | `jpeg` | `png` | `webp` | `heic` |
+|---|---|---|---|---|---|
+| JPEG | 86.6% saved | 86.6% saved | output 3.8x larger, 0% saved | 93.2% saved | **unsupported, `compressionFailed`** |
+| PNG | 7.6% saved | 96.8% saved | not measured | 98.4% saved | not measured |
+
+Measured on an OPPO CPH2337, Android 14 (API 34), arm64-v8a, with
+`flutter_image_compress` 2.4.0, compressing a 256x256 JPEG (22,650 bytes) and a
+256x256 PNG (94,457 bytes) at quality 60. **iOS is not verified yet**, so no iOS
+row is claimed here.
+
+What this means when choosing options:
+
+- **HEIC output is not available on every Android device.** On the device above
+  the request fails with `compressionFailed` instead of falling back, so request
+  `heic` only if your app can retry with `jpeg`.
+- **PNG output will not shrink a photograph.** PNG is lossless, so `quality` is
+  ignored and a photographic source grows. Use `jpeg` or `webp` for photographs
+  and `png` only when you need lossless output.
+- **`webp` produced the smallest output in every case measured**, roughly half
+  the JPEG size at the same quality.
+- **Quality 100 can exceed the source.** Re-encoding an already-compressed JPEG
+  at quality 100 produced 33,736 bytes from a 22,650 byte source. Because the
+  percentage is clamped, that reports `0.0% saved` rather than a negative value,
+  so do not read 0% as "nothing happened": compare `compressedSizeBytes` with
+  `originalSizeBytes` when the difference matters.
+- **Invalid bytes behind a supported extension fail uniformly.** Garbage in a
+  `.jpg`, `.png`, `.webp` or `.heic` file all raised `compressionFailed` and left
+  nothing in the output directory.
+
 Compression is asynchronous and uses the native codec, but applications should still present a loading state for large images. Generated output remains under caller control; remove exported files when they are no longer needed.
 
 ## Example screenshots
