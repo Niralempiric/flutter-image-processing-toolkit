@@ -32,4 +32,60 @@ void main() {
 
     expect(selection, ImageOutputFormat.webp);
   });
+
+  testWidgets('flags formats that are not available on every device', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OutputFormatSelector(value: null, onChanged: (_) {}),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(DropdownButtonFormField<ImageOutputFormat?>));
+    await tester.pumpAndSettle();
+
+    expect(find.text('HEIC (may be unavailable)'), findsWidgets);
+    expect(find.text('JPEG'), findsWidgets);
+    expect(find.text('HEIC'), findsNothing);
+  });
+
+  group('describeCompressionFailure', () {
+    const generic = ImageProcessingException(
+      ImageProcessingErrorCode.compressionFailed,
+      'Unable to compress the image.',
+    );
+
+    test('names the requested format when the codec failed', () {
+      final message = describeCompressionFailure(
+        generic,
+        ImageOutputFormat.heic,
+      );
+
+      expect(message, contains('HEIC'));
+      expect(message, contains('Keep input format'));
+      expect(message, isNot(contains('Unable to compress the image.')));
+    });
+
+    test('passes the error through when no format was requested', () {
+      expect(
+        describeCompressionFailure(generic, null),
+        'Unable to compress the image.',
+      );
+    });
+
+    test('passes other error codes through unchanged', () {
+      const invalid = ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'The input file is empty.',
+      );
+
+      expect(
+        describeCompressionFailure(invalid, ImageOutputFormat.heic),
+        'The input file is empty.',
+      );
+    });
+  });
 }

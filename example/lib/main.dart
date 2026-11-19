@@ -72,7 +72,8 @@ class _CompressionDemoPageState extends State<CompressionDemoPage> {
       if (!mounted) return;
       setState(() => _result = result);
     } on ImageProcessingException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      final message = describeCompressionFailure(error, _outputFormat);
+      if (mounted) setState(() => _error = message);
     } finally {
       if (mounted) setState(() => _isWorking = false);
     }
@@ -250,12 +251,44 @@ class OutputFormatSelector extends StatelessWidget {
           ...ImageOutputFormat.values.map(
             (format) => DropdownMenuItem(
               value: format,
-              child: Text(_formatLabel(format)),
+              child: Text(_menuLabel(format)),
             ),
           ),
         ],
         onChanged: onChanged,
       );
+}
+
+/// Formats whose native codec is not present on every device.
+///
+/// The device pass in issue #1 measured HEIC output failing on Android 14
+/// (API 34). See the codec capability matrix in the README.
+const _unevenlySupportedFormats = {ImageOutputFormat.heic};
+
+/// Label for the dropdown, flagging formats that may not be available.
+String _menuLabel(ImageOutputFormat format) =>
+    _unevenlySupportedFormats.contains(format)
+    ? '${_formatLabel(format)} (may be unavailable)'
+    : _formatLabel(format);
+
+/// Message shown when a compression request fails.
+///
+/// A `compressionFailed` error for a request that named [requestedFormat] is
+/// reported with that format, because native codec availability varies by
+/// device and OS version rather than being a property of the input. Every
+/// other error code already carries an actionable message and is passed
+/// through unchanged.
+String describeCompressionFailure(
+  ImageProcessingException error,
+  ImageOutputFormat? requestedFormat,
+) {
+  if (error.code != ImageProcessingErrorCode.compressionFailed ||
+      requestedFormat == null) {
+    return error.message;
+  }
+  return '${_formatLabel(requestedFormat)} output failed on this device. '
+      'Native codec support varies by device and OS version. Try '
+      '"Keep input format", or another format.';
 }
 
 String _formatLabel(ImageOutputFormat format) => switch (format) {
