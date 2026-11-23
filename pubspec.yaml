@@ -5,6 +5,16 @@ homepage: https://github.com/Niralempiric/flutter-image-processing-toolkit
 repository: https://github.com/Niralempiric/flutter-image-processing-toolkit
 issue_tracker: https://github.com/Niralempiric/flutter-image-processing-toolkit/issues
 
+screenshots:
+  - description: 'Gallery-to-export compression flow in the example app.'
+    path: doc/screenshots/demo.gif
+  - description: 'Choose an image to compress.'
+    path: doc/screenshots/01-home.png
+  - description: 'Tune quality and output format.'
+    path: doc/screenshots/02-selected.png
+  - description: 'Compare original and compressed output (86.6% saved at quality 60).'
+    path: doc/screenshots/03-result.png
+
 environment:
   sdk: ^3.12.0
   flutter: ">=3.50.0"
