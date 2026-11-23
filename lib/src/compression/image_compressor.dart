@@ -7,5 +7,8 @@ abstract interface class ImageCompressor {
     required String outputPath,
     required int quality,
     required ImageOutputFormat format,
+    int? targetWidth,
+    int? targetHeight,
+    bool keepExif = false,
   });
 }

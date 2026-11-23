@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_image_processing_toolkit/flutter_image_processing_toolkit.dart';
@@ -39,6 +40,7 @@ class _CompressionDemoPageState extends State<CompressionDemoPage> {
   CompressionResult? _result;
   int _quality = 80;
   ImageOutputFormat? _outputFormat;
+  CropPreset _cropPreset = CropPreset.none;
   bool _isWorking = false;
   String? _error;
 
@@ -47,6 +49,7 @@ class _CompressionDemoPageState extends State<CompressionDemoPage> {
     if (picked == null || !mounted) return;
     setState(() {
       _original = File(picked.path);
+      _cropPreset = CropPreset.none;
       _result = null;
       _error = null;
     });
@@ -61,11 +64,15 @@ class _CompressionDemoPageState extends State<CompressionDemoPage> {
     });
     try {
       final documents = await getApplicationDocumentsDirectory();
+      final cropRect = _cropPreset == CropPreset.none
+          ? null
+          : cropRectFor(_cropPreset, await _displayedSize(source));
       final result = await _compressor.compress(
         source,
         options: ImageCompressionOptions(
           quality: _quality,
           outputFormat: _outputFormat,
+          cropRect: cropRect,
           outputDirectory: Directory('${documents.path}/compressed-images'),
         ),
       );
@@ -127,6 +134,13 @@ class _CompressionDemoPageState extends State<CompressionDemoPage> {
                 onChanged: _isWorking
                     ? null
                     : (format) => setState(() => _outputFormat = format),
+              ),
+              const SizedBox(height: 16),
+              CropPresetSelector(
+                value: _cropPreset,
+                onChanged: _isWorking
+                    ? null
+                    : (preset) => setState(() => _cropPreset = preset),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
@@ -217,6 +231,8 @@ class _ResultCard extends StatelessWidget {
           Text('Original: ${_formatBytes(result.originalSizeBytes)}'),
           Text('Compressed: ${_formatBytes(result.compressedSizeBytes)}'),
           Text('Format: ${result.outputFormat.name.toUpperCase()}'),
+          if (result.outputWidth != null && result.outputHeight != null)
+            Text('Size: ${result.outputWidth} x ${result.outputHeight} px'),
           const SizedBox(height: 8),
           SelectableText('Exported to: ${result.outputFile.path}'),
         ],
@@ -229,6 +245,74 @@ String _formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+/// Ready-made crops for the demo, so no drag handles are needed.
+enum CropPreset {
+  none('No crop'),
+  centreSquare('Centre square'),
+  centreHalf('Centre half'),
+  topLeftQuarter('Top-left quarter');
+
+  const CropPreset(this.label);
+  final String label;
+}
+
+/// The rectangle [preset] selects in an image of the given displayed [size],
+/// or null for [CropPreset.none]. Coordinates are in pixels.
+Rect? cropRectFor(CropPreset preset, Size size) {
+  final w = size.width;
+  final h = size.height;
+  switch (preset) {
+    case CropPreset.none:
+      return null;
+    case CropPreset.centreSquare:
+      final side = w < h ? w : h;
+      return Rect.fromLTWH((w - side) / 2, (h - side) / 2, side, side);
+    case CropPreset.centreHalf:
+      return Rect.fromLTWH(w / 4, h / 4, w / 2, h / 2);
+    case CropPreset.topLeftQuarter:
+      return Rect.fromLTWH(0, 0, w / 2, h / 2);
+  }
+}
+
+/// The size of [file] as displayed, after EXIF orientation.
+Future<Size> _displayedSize(File file) async {
+  final codec = await ui.instantiateImageCodec(await file.readAsBytes());
+  try {
+    final image = (await codec.getNextFrame()).image;
+    final size = Size(image.width.toDouble(), image.height.toDouble());
+    image.dispose();
+    return size;
+  } finally {
+    codec.dispose();
+  }
+}
+
+class CropPresetSelector extends StatelessWidget {
+  const CropPresetSelector({super.key, required this.value, this.onChanged});
+
+  final CropPreset value;
+  final ValueChanged<CropPreset>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => DropdownButtonFormField<CropPreset>(
+    key: ValueKey(value),
+    initialValue: value,
+    decoration: const InputDecoration(
+      border: OutlineInputBorder(),
+      labelText: 'Crop',
+    ),
+    items: [
+      for (final preset in CropPreset.values)
+        DropdownMenuItem(value: preset, child: Text(preset.label)),
+    ],
+    onChanged: onChanged == null
+        ? null
+        : (preset) {
+            if (preset != null) onChanged!(preset);
+          },
+  );
 }
 
 class OutputFormatSelector extends StatelessWidget {
