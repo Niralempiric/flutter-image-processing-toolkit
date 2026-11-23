@@ -93,7 +93,17 @@ Compression is asynchronous and uses the native codec, but applications should s
 
 ## Example screenshots
 
-Run the example on an Android or iOS device to see the gallery-to-export compression flow. Screenshots will be added after device verification; no screenshots are included yet.
+The example app walks through the gallery-to-export flow: pick an image, tune the quality, choose an output format, and compare the original with the compressed result.
+
+![Gallery-to-export compression flow in the example app](doc/screenshots/demo.gif)
+
+| Choose an image | Tune quality and format | Compare the result |
+|---|---|---|
+| <img src="doc/screenshots/01-home.png" width="240" alt="Example app home screen"> | <img src="doc/screenshots/02-selected.png" width="240" alt="Selected image with the quality slider at 60"> | <img src="doc/screenshots/03-result.png" width="240" alt="Original 22.1 KB, compressed 3.0 KB, 86.6% saved"> |
+
+Captured from a release build on an Android 15 (API 35) emulator, compressing the bundled 256x256 `sample_photo.jpg` at quality 60 with the source format kept: 22.1 KB became 3.0 KB (86.6% saved). iOS screenshots are not included because iOS is not verified yet.
+
+To run the example yourself on an Android or iOS device:
 
 ```sh
 cd example
