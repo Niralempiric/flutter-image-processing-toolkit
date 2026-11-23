@@ -19,3 +19,8 @@ green gradient, 400x200 stored) with a hand-built EXIF segment holding only
 `Orientation = 6`, so it is displayed as 200x400 with blue at the top and green
 at the bottom. It is generated, not photographed, so it has no attribution
 requirement.
+
+`sample_gps.jpg` is the same 400x200 gradient with a hand-built EXIF segment:
+`Make = "ToolkitTest"`, `Orientation = 1`, and a GPS block (10 deg N, 20 deg E,
+an arbitrary open-ocean point, not a real photo location). It exists to check
+that `keepExif` keeps metadata and `stripLocation` removes only the GPS part.

@@ -56,6 +56,17 @@ final result = await compressor.compress(
 print('${result.outputWidth}x${result.outputHeight}'); // 1280x960
 ```
 
+By default the output carries no EXIF metadata, so a photo's location is dropped. To keep the metadata (camera, date and so on), set `keepExif: true`; add `stripLocation: true` to remove only the GPS location:
+
+```dart
+final result = await compressor.compress(
+  File('/path/to/photo.jpg'),
+  options: const ImageCompressionOptions(keepExif: true, stripLocation: true),
+);
+```
+
+`keepExif: true` alone keeps the location too. `stripLocation` works for JPEG output only, and if the location cannot be removed the call throws and leaves no file rather than writing one that still contains it. See [Privacy and metadata](#privacy-and-metadata).
+
 Omit `outputFormat` to use the supported source format. Omit `outputDirectory` to create a `compressed_images` directory beside the input. Catch `ImageProcessingException` and inspect its `code` (`invalidInput`, `unsupportedFormat`, or `compressionFailed`).
 
 ## API
@@ -63,6 +74,16 @@ Omit `outputFormat` to use the supported source format. Omit `outputDirectory` t
 `ImageCompressionService.compress(File, {ImageCompressionOptions options})` returns a `Future<CompressionResult>`.
 
 `CompressionResult` provides `originalFile`, `outputFile`, `originalSizeBytes`, `compressedSizeBytes`, `outputFormat`, `outputWidth`, `outputHeight`, and `compressionPercentage`. `outputWidth` and `outputHeight` are null when the output's dimensions cannot be read, for example a HEIC file on an engine that cannot decode it. The percentage is clamped to 0–100: an output that is larger than its source reports `0% saved` rather than a misleading negative value.
+
+## Privacy and metadata
+
+| Options | Output metadata |
+|---|---|
+| default | none |
+| `keepExif: true` | all kept, including GPS; orientation reset to normal |
+| `keepExif: true, stripLocation: true` | all kept except the GPS block |
+
+Checked on Android (API 35) with a synthetic JPEG carrying Make, Orientation and GPS. `stripLocation` removes the EXIF GPS block and overwrites its bytes with zeros. It does not touch other places a location can appear, such as a free-text caption or XMP packets. The native codec writes EXIF only for JPEG output. iOS is not verified.
 
 ## Platforms and limitations
 

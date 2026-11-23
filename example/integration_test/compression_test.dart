@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -12,6 +13,9 @@ const _fixtureAsset = 'assets/sample_photo.jpg';
 
 /// 400x200 fixture used to check that resizing keeps the aspect ratio.
 const _wideFixtureAsset = 'assets/sample_wide.jpg';
+
+/// 400x200 JPEG with EXIF Make, Orientation 1 and a GPS block (10 N, 20 E).
+const _gpsFixtureAsset = 'assets/sample_gps.jpg';
 
 /// 400x200 stored pixels with EXIF orientation 6, so it is displayed as
 /// 200x400. Blue on the stored left edge, green on the right, which makes a
@@ -71,6 +75,66 @@ void main() {
     expect(await result.outputFile.length(), result.compressedSizeBytes);
     expect(result.compressionPercentage, inInclusiveRange(0, 100));
     expect(result.outputFormat, ImageOutputFormat.jpeg);
+  });
+
+  group('EXIF metadata', () {
+    Future<Uint8List> compressGps({
+      bool keepExif = false,
+      bool stripLocation = false,
+    }) async {
+      final source = await _copyFixtureInto(workspace, asset: _gpsFixtureAsset);
+      final result = await ImageCompressionService().compress(
+        source,
+        options: ImageCompressionOptions(
+          quality: 70,
+          keepExif: keepExif,
+          stripLocation: stripLocation,
+          outputDirectory: Directory('${workspace.path}/exports'),
+        ),
+      );
+      return result.outputFile.readAsBytes();
+    }
+
+    testWidgets('the fixture carries Make, orientation and GPS', (
+      tester,
+    ) async {
+      final data = await rootBundle.load(_gpsFixtureAsset);
+      final source = data.buffer.asUint8List();
+
+      expect(_ifd0Tags(source), containsAll([0x010F, 0x0112, 0x8825]));
+      expect(_hasCoordinates(source), isTrue);
+    });
+
+    testWidgets('writes no metadata by default', (tester) async {
+      final output = await compressGps();
+
+      expect(_ifd0Tags(output), isEmpty);
+      expect(_hasCoordinates(output), isFalse);
+    });
+
+    testWidgets('keepExif keeps the metadata, including location', (
+      tester,
+    ) async {
+      final output = await compressGps(keepExif: true);
+
+      expect(_ifd0Tags(output), containsAll([0x010F, 0x0112, 0x8825]));
+      expect(_hasCoordinates(output), isTrue);
+      expect(_orientationOf(output), 1);
+    });
+
+    testWidgets('stripLocation removes only the GPS block', (tester) async {
+      final output = await compressGps(keepExif: true, stripLocation: true);
+
+      final tags = _ifd0Tags(output);
+      expect(tags, containsAll([0x010F, 0x0112]));
+      expect(tags, isNot(contains(0x8825)));
+      expect(_hasCoordinates(output), isFalse);
+      expect(_orientationOf(output), 1);
+      // The result is still a valid image of the same size.
+      final decoded = await ui.instantiateImageCodec(output);
+      final image = (await decoded.getNextFrame()).image;
+      expect((image.width, image.height), (400, 200));
+    });
   });
 
   group('EXIF orientation', () {
@@ -233,4 +297,70 @@ Future<_Decoded> _decode(File file) async {
     top: colorAt(1),
     bottom: colorAt(image.height - 2),
   );
+}
+
+// --- EXIF helpers ----------------------------------------------------------
+
+/// The IFD0 tag ids of the JPEG's EXIF segment, or empty when it has none.
+List<int> _ifd0Tags(Uint8List jpeg) {
+  final tiff = _tiffStart(jpeg);
+  if (tiff == null) return const [];
+  final endian = jpeg[tiff] == 0x49 ? Endian.little : Endian.big;
+  final view = ByteData.sublistView(jpeg);
+  final ifd0 = tiff + view.getUint32(tiff + 4, endian);
+  final count = view.getUint16(ifd0, endian);
+  return [
+    for (var i = 0; i < count; i++) view.getUint16(ifd0 + 2 + i * 12, endian),
+  ];
+}
+
+int _orientationOf(Uint8List jpeg) {
+  final tiff = _tiffStart(jpeg)!;
+  final endian = jpeg[tiff] == 0x49 ? Endian.little : Endian.big;
+  final view = ByteData.sublistView(jpeg);
+  final ifd0 = tiff + view.getUint32(tiff + 4, endian);
+  final count = view.getUint16(ifd0, endian);
+  for (var i = 0; i < count; i++) {
+    final entry = ifd0 + 2 + i * 12;
+    if (view.getUint16(entry, endian) == 0x0112) {
+      return view.getUint16(entry + 8, endian);
+    }
+  }
+  throw StateError('no orientation tag');
+}
+
+int? _tiffStart(Uint8List jpeg) {
+  var offset = 2;
+  while (offset + 4 <= jpeg.length && jpeg[offset] == 0xFF) {
+    final marker = jpeg[offset + 1];
+    if (marker == 0xDA) return null;
+    final length = (jpeg[offset + 2] << 8) | jpeg[offset + 3];
+    if (marker == 0xE1 &&
+        jpeg[offset + 4] == 0x45 &&
+        jpeg[offset + 5] == 0x78) {
+      return offset + 10;
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
+/// Whether the fixture's coordinates (10, 0, 0 and 20, 0, 0 as rationals)
+/// appear anywhere in the file, in either byte order.
+bool _hasCoordinates(Uint8List jpeg) {
+  const values = [10, 1, 0, 1, 0, 1, 20, 1, 0, 1, 0, 1];
+  for (final endian in [Endian.big, Endian.little]) {
+    final pattern = <int>[
+      for (final v in values)
+        ...(ByteData(4)..setUint32(0, v, endian)).buffer.asUint8List(),
+    ];
+    for (var i = 0; i + pattern.length <= jpeg.length; i++) {
+      var match = true;
+      for (var j = 0; j < pattern.length && match; j++) {
+        match = jpeg[i + j] == pattern[j];
+      }
+      if (match) return true;
+    }
+  }
+  return false;
 }
