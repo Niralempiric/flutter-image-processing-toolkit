@@ -64,9 +64,12 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # Fixture for integration_test/compression_test.dart. See assets/README.md.
+  # Fixtures for integration_test/compression_test.dart. See assets/README.md.
   assets:
     - assets/sample_photo.jpg
+    - assets/sample_wide.jpg
+    - assets/sample_rotated.jpg
+    - assets/sample_gps.jpg
 
   # To add assets to your application, add an assets section, like this:
   # assets:

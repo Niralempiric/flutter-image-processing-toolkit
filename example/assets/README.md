@@ -8,3 +8,19 @@ covered by this repository's BSD 3-Clause license.
 
 It is used by `example/integration_test/compression_test.dart`. Keep it small;
 it ships inside the example app bundle.
+
+`sample_wide.jpg` is a 400x200 JPEG gradient generated synthetically (ffmpeg
+`gradients` source), so it is also free of third-party attribution. Its 2:1
+aspect ratio lets the resize integration tests tell a proportional scale from
+a square crop or stretch.
+
+`sample_rotated.jpg` is `sample_wide.jpg`-style content (a horizontal blue to
+green gradient, 400x200 stored) with a hand-built EXIF segment holding only
+`Orientation = 6`, so it is displayed as 200x400 with blue at the top and green
+at the bottom. It is generated, not photographed, so it has no attribution
+requirement.
+
+`sample_gps.jpg` is the same 400x200 gradient with a hand-built EXIF segment:
+`Make = "ToolkitTest"`, `Orientation = 1`, and a GPS block (10 deg N, 20 deg E,
+an arbitrary open-ocean point, not a real photo location). It exists to check
+that `keepExif` keeps metadata and `stripLocation` removes only the GPS part.

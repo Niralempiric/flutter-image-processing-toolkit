@@ -1,5 +1,7 @@
 # Flutter Image Processing Toolkit
 
+[![Flutter checks](https://github.com/Niralempiric/flutter-image-processing-toolkit/actions/workflows/flutter.yml/badge.svg)](https://github.com/Niralempiric/flutter-image-processing-toolkit/actions/workflows/flutter.yml) ![line coverage](https://raw.githubusercontent.com/Niralempiric/flutter-image-processing-toolkit/badges/coverage.svg)
+
 A reusable Flutter package for non-destructive image compression on Android and iOS. This first release intentionally implements compression only; resizing, cropping, metadata, and camera workflows are out of scope.
 
 ## Features
@@ -43,6 +45,8 @@ print(result.outputFile.path);
 print('${result.compressionPercentage.toStringAsFixed(1)}% saved');
 ```
 
+HEIC output is not available on every device. To retry a failed HEIC request in another format, set `fallbackFormat`:
+
 ```dart
 // HEIC where the device can encode it, JPEG where it cannot.
 final result = await compressor.compress(
@@ -55,15 +59,77 @@ final result = await compressor.compress(
 if (result.usedFallbackFormat) print('HEIC unavailable, wrote JPEG');
 ```
 
+To cap the dimensions, set `maxWidth`, `maxHeight`, or both. The image is scaled down to fit inside them with its aspect ratio kept, and is never upscaled:
+
+```dart
+final result = await compressor.compress(
+  File('/path/to/photo.jpg'), // for example 4000x3000
+  options: const ImageCompressionOptions(maxWidth: 1280, maxHeight: 1280),
+);
+
+print('${result.outputWidth}x${result.outputHeight}'); // 1280x960
+```
+
+By default the output carries no EXIF metadata, so a photo's location is dropped. To keep the metadata (camera, date and so on), set `keepExif: true`; add `stripLocation: true` to remove only the GPS location:
+
+```dart
+final result = await compressor.compress(
+  File('/path/to/photo.jpg'),
+  options: const ImageCompressionOptions(keepExif: true, stripLocation: true),
+);
+```
+
+`keepExif: true` alone keeps the location too. `stripLocation` works for JPEG output only, and if the location cannot be removed the call throws and leaves no file rather than writing one that still contains it. See [Privacy and metadata](#privacy-and-metadata).
+
+To keep only part of an image, set `cropRect`. The rectangle is in pixels of the image as displayed (after EXIF orientation), with the origin at the top left, and must lie inside the image:
+
+```dart
+final result = await compressor.compress(
+  File('/path/to/photo.jpg'),
+  options: const ImageCompressionOptions(
+    cropRect: Rect.fromLTWH(100, 50, 800, 600),
+    maxWidth: 400, // resizing and quality apply to the cropped image
+  ),
+);
+```
+
+A rectangle that is empty, partly outside the image, or not finite fails with `invalidInput` before anything is written. Edges are rounded to the nearest pixel. The source file is never changed. See [Cropping](#cropping) for the details.
+
 Omit `outputFormat` to use the supported source format. Omit `outputDirectory` to create a `compressed_images` directory beside the input. Catch `ImageProcessingException` and inspect its `code` (`invalidInput`, `unsupportedFormat`, or `compressionFailed`).
 
 ## API
 
 `ImageCompressionService.compress(File, {ImageCompressionOptions options})` returns a `Future<CompressionResult>`.
 
-`CompressionResult` provides `originalFile`, `outputFile`, `originalSizeBytes`, `compressedSizeBytes`, `outputFormat`, and `compressionPercentage`. The percentage is clamped to 0–100: an output that is larger than its source reports `0% saved` rather than a misleading negative value.
+`CompressionResult` provides `originalFile`, `outputFile`, `originalSizeBytes`, `compressedSizeBytes`, `outputFormat`, `outputWidth`, `outputHeight`, and `compressionPercentage`. `outputWidth` and `outputHeight` are null when the output's dimensions cannot be read, for example a HEIC file on an engine that cannot decode it. The percentage is clamped to 0–100: an output that is larger than its source reports `0% saved` rather than a misleading negative value.
+
+## Cropping
+
+Cropping happens before resizing and compression, so `maxWidth`, `maxHeight`, `quality` and `outputFormat` apply to the cropped image, and `result.originalSizeBytes` is still the size of the source file.
+
+- The crop goes through a temporary lossless PNG, so the image is encoded lossily only once, in the output format. The temporary file is deleted afterwards, also when the operation fails.
+- The whole source is decoded into memory to crop it, roughly four bytes per pixel, so a very large photo needs a lot of memory while it is cropped.
+- The cropped image does not carry the source's metadata, so `cropRect` cannot be combined with `keepExif` (it fails with `invalidInput`).
+- Cropping needs a source Flutter can decode. A source it cannot (some HEIC files) fails with `compressionFailed`.
+- Checked on Android (API 35) with a real codec, including a photo stored rotated: the rectangle follows the displayed image. iOS is not verified.
+
+## Privacy and metadata
+
+| Options | Output metadata |
+|---|---|
+| default | none |
+| `keepExif: true` | all kept, including GPS; orientation reset to normal |
+| `keepExif: true, stripLocation: true` | all kept except the GPS block |
+
+Checked on Android (API 35) with a synthetic JPEG carrying Make, Orientation and GPS. `stripLocation` removes the EXIF GPS block and overwrites its bytes with zeros. It does not touch other places a location can appear, such as a free-text caption or XMP packets. The native codec writes EXIF only for JPEG output. iOS is not verified.
 
 ## Platforms and limitations
+
+EXIF orientation is applied to the output pixels, so a photo stored rotated comes out the same way up as it is displayed, and the orientation tag is not copied across (it would turn the image a second time). This is checked on Android (API 35) with a rotated fixture; iOS is not verified.
+
+`maxWidth` and `maxHeight` apply to the image as displayed, after its EXIF orientation is applied, so a portrait photo stored rotated is limited like an upright one. Resizing needs the source dimensions, so a source Flutter cannot decode (some HEIC files) fails with `compressionFailed` when a limit is set. Output sizes were verified with the real Android codec on an emulator (API 35); iOS is not verified.
+
+Without `maxWidth` or `maxHeight`, the underlying `flutter_image_compress` plugin still applies its own default (1920x1080), which by reading its Android source scales an image larger than that down. That behavior predates the resize options and is unchanged here.
 
 Android and iOS are supported through `flutter_image_compress`. Codec availability, notably HEIC and WebP output, depends on the platform and device; requests unavailable on the current device fail with `compressionFailed`. Files are validated by extension before native decoding, so a corrupt file with a supported extension may still fail during native compression. A failed operation leaves nothing behind: a partial or empty file written by the codec is removed, and the source file is never deleted, even if the codec reports the source as its own output. An empty codec output is reported as `compressionFailed` rather than as a result claiming 100% saved. The package does not target web, macOS, Windows, or Linux in this release.
 
@@ -134,6 +200,15 @@ flutter analyze
 flutter test
 cd example && flutter test
 ```
+
+CI runs the same checks with `flutter test --coverage`, fails if line coverage is below 80%, shows a per-file table in the job summary, and publishes the badge above from `main`. To see the table locally:
+
+```sh
+flutter test --coverage
+dart tool/coverage_summary.dart
+```
+
+Line coverage covers the host-side tests only. `native_image_compressor.dart` calls the real codec, so it is exercised by the device integration tests, which CI does not run, and shows as low here.
 
 ### Integration tests
 
