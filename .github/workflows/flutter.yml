@@ -3,8 +3,8 @@ name: Flutter checks
 on:
   push:
     branches: [main]
+  # Every pull request, not only those aimed at main, so stacked PRs are checked.
   pull_request:
-    branches: [main]
 
 jobs:
   verify:
