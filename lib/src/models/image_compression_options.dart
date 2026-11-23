@@ -12,6 +12,8 @@ class ImageCompressionOptions {
     this.quality = 80,
     this.outputFormat,
     this.outputDirectory,
+    this.maxWidth,
+    this.maxHeight,
   });
 
   /// Codec quality, from 0 (smallest) to 100 (highest quality).
@@ -22,4 +24,15 @@ class ImageCompressionOptions {
 
   /// Directory for the generated file. A directory is created if necessary.
   final Directory? outputDirectory;
+
+  /// Largest output width in pixels, or null for no limit.
+  ///
+  /// The image is scaled down to fit inside [maxWidth] by [maxHeight] while
+  /// keeping its aspect ratio. An image that already fits is never upscaled.
+  /// Both limits are measured on the stored pixel grid, before any EXIF
+  /// rotation is applied. Must be positive when set.
+  final int? maxWidth;
+
+  /// Largest output height in pixels, or null for no limit. See [maxWidth].
+  final int? maxHeight;
 }

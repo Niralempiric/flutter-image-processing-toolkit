@@ -8,13 +8,18 @@ import '../models/image_compression_options.dart';
 import '../models/image_output_format.dart';
 import 'image_compressor.dart';
 import 'native_image_compressor.dart';
+import 'resize.dart';
 
 /// Compresses image files using the native Android and iOS codecs.
 class ImageCompressionService {
-  ImageCompressionService({ImageCompressor? compressor})
-    : _compressor = compressor ?? const NativeImageCompressor();
+  ImageCompressionService({
+    ImageCompressor? compressor,
+    ImageSizeReader imageSizeReader = readImageSize,
+  }) : _compressor = compressor ?? const NativeImageCompressor(),
+       _readImageSize = imageSizeReader;
 
   final ImageCompressor _compressor;
+  final ImageSizeReader _readImageSize;
 
   /// Creates a new compressed file and leaves [input] unchanged.
   Future<CompressionResult> compress(
@@ -24,6 +29,7 @@ class ImageCompressionService {
     _validateOptions(options);
     final originalSize = await _validateInput(input);
     final format = options.outputFormat ?? _formatForPath(input.path);
+    final target = await _resizeTarget(input, options);
     final outputDirectory =
         options.outputDirectory ??
         Directory(path.join(input.parent.path, 'compressed_images'));
@@ -42,6 +48,8 @@ class ImageCompressionService {
         outputPath: outputPath,
         quality: options.quality,
         format: format,
+        targetWidth: target?.width,
+        targetHeight: target?.height,
       );
       if (outputPathFromCodec == null) {
         throw const ImageProcessingException(
@@ -70,12 +78,15 @@ class ImageCompressionService {
           'The native codec produced an empty output file.',
         );
       }
+      final outputSize = await _readImageSize(output);
       return CompressionResult(
         originalFile: input,
         outputFile: output,
         originalSizeBytes: originalSize,
         compressedSizeBytes: compressedSize,
         outputFormat: format,
+        outputWidth: outputSize?.width,
+        outputHeight: outputSize?.height,
       );
     } on ImageProcessingException {
       await _discardPartialOutput(input, expectedOutput, codecOutput);
@@ -88,6 +99,24 @@ class ImageCompressionService {
         cause: error,
       );
     }
+  }
+
+  /// The size to scale to, or null when no resize was requested.
+  Future<ImageSize?> _resizeTarget(
+    File input,
+    ImageCompressionOptions options,
+  ) async {
+    final maxWidth = options.maxWidth;
+    final maxHeight = options.maxHeight;
+    if (maxWidth == null && maxHeight == null) return null;
+    final source = await _readImageSize(input);
+    if (source == null) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.compressionFailed,
+        'Unable to read the image dimensions needed to resize it.',
+      );
+    }
+    return fitWithin(source, maxWidth: maxWidth, maxHeight: maxHeight);
   }
 
   Future<int> _validateInput(File input) async {
@@ -113,6 +142,15 @@ class ImageCompressionService {
       throw const ImageProcessingException(
         ImageProcessingErrorCode.invalidInput,
         'Compression quality must be between 0 and 100.',
+      );
+    }
+    final maxWidth = options.maxWidth;
+    final maxHeight = options.maxHeight;
+    if ((maxWidth != null && maxWidth <= 0) ||
+        (maxHeight != null && maxHeight <= 0)) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'maxWidth and maxHeight must be positive when set.',
       );
     }
   }
