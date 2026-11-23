@@ -10,13 +10,21 @@ class CompressionResult {
     required this.originalSizeBytes,
     required this.compressedSizeBytes,
     required this.outputFormat,
+    this.usedFallbackFormat = false,
   });
 
   final File originalFile;
   final File outputFile;
   final int originalSizeBytes;
   final int compressedSizeBytes;
+
+  /// The format that was actually written, which differs from the requested
+  /// one when [usedFallbackFormat] is `true`.
   final ImageOutputFormat outputFormat;
+
+  /// Whether [outputFormat] is the `fallbackFormat` used after the requested
+  /// format failed.
+  final bool usedFallbackFormat;
 
   /// Fraction of bytes saved, clamped to avoid invalid percentages.
   double get compressionRatio {

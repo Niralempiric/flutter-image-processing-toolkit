@@ -12,6 +12,7 @@ class ImageCompressionOptions {
     this.quality = 80,
     this.outputFormat,
     this.outputDirectory,
+    this.fallbackFormat,
   });
 
   /// Codec quality, from 0 (smallest) to 100 (highest quality).
@@ -22,4 +23,14 @@ class ImageCompressionOptions {
 
   /// Directory for the generated file. A directory is created if necessary.
   final Directory? outputDirectory;
+
+  /// Format to retry with when a HEIC request fails.
+  ///
+  /// HEIC output is not available on every device, and the native codec
+  /// reports the failure as `compressionFailed`. When this is set and the
+  /// HEIC attempt fails, the operation is retried once in this format and
+  /// `CompressionResult.usedFallbackFormat` is `true`. Null (the default)
+  /// disables the retry, so a failed HEIC request throws as before. It must
+  /// not be [ImageOutputFormat.heic].
+  final ImageOutputFormat? fallbackFormat;
 }

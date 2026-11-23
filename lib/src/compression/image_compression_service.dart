@@ -24,6 +24,32 @@ class ImageCompressionService {
     _validateOptions(options);
     final originalSize = await _validateInput(input);
     final format = options.outputFormat ?? _formatForPath(input.path);
+    final fallback = options.fallbackFormat;
+    try {
+      return await _compressAs(input, originalSize, format, options);
+    } on ImageProcessingException catch (error) {
+      final canFallBack =
+          fallback != null &&
+          format == ImageOutputFormat.heic &&
+          error.code == ImageProcessingErrorCode.compressionFailed;
+      if (!canFallBack) rethrow;
+      return _compressAs(
+        input,
+        originalSize,
+        fallback,
+        options,
+        usedFallbackFormat: true,
+      );
+    }
+  }
+
+  Future<CompressionResult> _compressAs(
+    File input,
+    int originalSize,
+    ImageOutputFormat format,
+    ImageCompressionOptions options, {
+    bool usedFallbackFormat = false,
+  }) async {
     final outputDirectory =
         options.outputDirectory ??
         Directory(path.join(input.parent.path, 'compressed_images'));
@@ -76,6 +102,7 @@ class ImageCompressionService {
         originalSizeBytes: originalSize,
         compressedSizeBytes: compressedSize,
         outputFormat: format,
+        usedFallbackFormat: usedFallbackFormat,
       );
     } on ImageProcessingException {
       await _discardPartialOutput(input, expectedOutput, codecOutput);
@@ -113,6 +140,12 @@ class ImageCompressionService {
       throw const ImageProcessingException(
         ImageProcessingErrorCode.invalidInput,
         'Compression quality must be between 0 and 100.',
+      );
+    }
+    if (options.fallbackFormat == ImageOutputFormat.heic) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'fallbackFormat must be a format other than HEIC.',
       );
     }
   }
