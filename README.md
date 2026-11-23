@@ -45,15 +45,30 @@ print(result.outputFile.path);
 print('${result.compressionPercentage.toStringAsFixed(1)}% saved');
 ```
 
+To cap the dimensions, set `maxWidth`, `maxHeight`, or both. The image is scaled down to fit inside them with its aspect ratio kept, and is never upscaled:
+
+```dart
+final result = await compressor.compress(
+  File('/path/to/photo.jpg'), // for example 4000x3000
+  options: const ImageCompressionOptions(maxWidth: 1280, maxHeight: 1280),
+);
+
+print('${result.outputWidth}x${result.outputHeight}'); // 1280x960
+```
+
 Omit `outputFormat` to use the supported source format. Omit `outputDirectory` to create a `compressed_images` directory beside the input. Catch `ImageProcessingException` and inspect its `code` (`invalidInput`, `unsupportedFormat`, or `compressionFailed`).
 
 ## API
 
 `ImageCompressionService.compress(File, {ImageCompressionOptions options})` returns a `Future<CompressionResult>`.
 
-`CompressionResult` provides `originalFile`, `outputFile`, `originalSizeBytes`, `compressedSizeBytes`, `outputFormat`, and `compressionPercentage`. The percentage is clamped to 0–100: an output that is larger than its source reports `0% saved` rather than a misleading negative value.
+`CompressionResult` provides `originalFile`, `outputFile`, `originalSizeBytes`, `compressedSizeBytes`, `outputFormat`, `outputWidth`, `outputHeight`, and `compressionPercentage`. `outputWidth` and `outputHeight` are null when the output's dimensions cannot be read, for example a HEIC file on an engine that cannot decode it. The percentage is clamped to 0–100: an output that is larger than its source reports `0% saved` rather than a misleading negative value.
 
 ## Platforms and limitations
+
+`maxWidth` and `maxHeight` apply to the image as displayed, after its EXIF orientation is applied, so a portrait photo stored rotated is limited like an upright one. Resizing needs the source dimensions, so a source Flutter cannot decode (some HEIC files) fails with `compressionFailed` when a limit is set. Output sizes were verified with the real Android codec on an emulator (API 35); iOS is not verified.
+
+Without `maxWidth` or `maxHeight`, the underlying `flutter_image_compress` plugin still applies its own default (1920x1080), which by reading its Android source scales an image larger than that down. That behavior predates the resize options and is unchanged here.
 
 Android and iOS are supported through `flutter_image_compress`. Codec availability, notably HEIC and WebP output, depends on the platform and device; requests unavailable on the current device fail with `compressionFailed`. Files are validated by extension before native decoding, so a corrupt file with a supported extension may still fail during native compression. A failed operation leaves nothing behind: a partial or empty file written by the codec is removed, and the source file is never deleted, even if the codec reports the source as its own output. An empty codec output is reported as `compressionFailed` rather than as a result claiming 100% saved. The package does not target web, macOS, Windows, or Linux in this release.
 

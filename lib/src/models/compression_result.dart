@@ -10,6 +10,8 @@ class CompressionResult {
     required this.originalSizeBytes,
     required this.compressedSizeBytes,
     required this.outputFormat,
+    this.outputWidth,
+    this.outputHeight,
   });
 
   final File originalFile;
@@ -17,6 +19,14 @@ class CompressionResult {
   final int originalSizeBytes;
   final int compressedSizeBytes;
   final ImageOutputFormat outputFormat;
+
+  /// Pixel width of [outputFile], or null if it could not be read (for
+  /// example a HEIC file on a platform whose Flutter engine cannot decode it).
+  final int? outputWidth;
+
+  /// Pixel height of [outputFile], or null under the same conditions as
+  /// [outputWidth].
+  final int? outputHeight;
 
   /// Fraction of bytes saved, clamped to avoid invalid percentages.
   double get compressionRatio {

@@ -9,6 +9,9 @@ import 'package:path_provider/path_provider.dart';
 /// Bundled fixture, declared in the example app's pubspec assets.
 const _fixtureAsset = 'assets/sample_photo.jpg';
 
+/// 400x200 fixture used to check that resizing keeps the aspect ratio.
+const _wideFixtureAsset = 'assets/sample_wide.jpg';
+
 /// Exercises the real Android and iOS codecs, which the host-side unit tests
 /// replace with an injected adapter.
 ///
@@ -63,11 +66,78 @@ void main() {
     expect(result.compressionPercentage, inInclusiveRange(0, 100));
     expect(result.outputFormat, ImageOutputFormat.jpeg);
   });
+
+  group('resize', () {
+    Future<CompressionResult> resize(
+      File source, {
+      int? maxWidth,
+      int? maxHeight,
+    }) => ImageCompressionService().compress(
+      source,
+      options: ImageCompressionOptions(
+        quality: 70,
+        maxWidth: maxWidth,
+        maxHeight: maxHeight,
+        outputDirectory: Directory('${workspace.path}/exports'),
+      ),
+    );
+
+    testWidgets('limits the width and keeps the aspect ratio', (tester) async {
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _wideFixtureAsset,
+      );
+
+      final result = await resize(source, maxWidth: 100);
+
+      expect(result.outputWidth, 100);
+      expect(result.outputHeight, 50);
+    });
+
+    testWidgets('limits the height and keeps the aspect ratio', (tester) async {
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _wideFixtureAsset,
+      );
+
+      final result = await resize(source, maxHeight: 50);
+
+      expect(result.outputWidth, 100);
+      expect(result.outputHeight, 50);
+    });
+
+    testWidgets('fits inside both limits', (tester) async {
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _wideFixtureAsset,
+      );
+
+      final result = await resize(source, maxWidth: 80, maxHeight: 80);
+
+      expect(result.outputWidth, 80);
+      expect(result.outputHeight, 40);
+    });
+
+    testWidgets('never upscales a smaller image', (tester) async {
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _wideFixtureAsset,
+      );
+
+      final result = await resize(source, maxWidth: 1000, maxHeight: 1000);
+
+      expect(result.outputWidth, 400);
+      expect(result.outputHeight, 200);
+    });
+  });
 }
 
-Future<File> _copyFixtureInto(Directory directory) async {
-  final data = await rootBundle.load(_fixtureAsset);
-  final file = File('${directory.path}/sample_photo.jpg');
+Future<File> _copyFixtureInto(
+  Directory directory, {
+  String asset = _fixtureAsset,
+}) async {
+  final data = await rootBundle.load(asset);
+  final file = File('${directory.path}/${asset.split('/').last}');
   await file.writeAsBytes(
     data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
   );
