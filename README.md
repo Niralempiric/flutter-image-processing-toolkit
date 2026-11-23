@@ -64,7 +64,7 @@ Omit `outputFormat` to use the supported source format. Omit `outputDirectory` t
 
 ## Platforms and limitations
 
-`maxWidth` and `maxHeight` are measured on the stored pixel grid, before EXIF rotation is applied, so for a photo stored rotated the limits apply to the unrotated image. Resizing needs the source dimensions, so a source Flutter cannot decode (some HEIC files) fails with `compressionFailed` when a limit is set. Output sizes were verified with the real Android codec on an emulator (API 35); iOS is not verified.
+`maxWidth` and `maxHeight` apply to the image as displayed, after its EXIF orientation is applied, so a portrait photo stored rotated is limited like an upright one. Resizing needs the source dimensions, so a source Flutter cannot decode (some HEIC files) fails with `compressionFailed` when a limit is set. Output sizes were verified with the real Android codec on an emulator (API 35); iOS is not verified.
 
 Without `maxWidth` or `maxHeight`, the underlying `flutter_image_compress` plugin still applies its own default (1920x1080), which by reading its Android source scales an image larger than that down. That behavior predates the resize options and is unchanged here.
 

@@ -29,8 +29,9 @@ class ImageCompressionOptions {
   ///
   /// The image is scaled down to fit inside [maxWidth] by [maxHeight] while
   /// keeping its aspect ratio. An image that already fits is never upscaled.
-  /// Both limits are measured on the stored pixel grid, before any EXIF
-  /// rotation is applied. Must be positive when set.
+  /// Both limits apply to the image as it is displayed, after any EXIF
+  /// orientation is applied, so a portrait photo stored rotated is limited
+  /// the same way as an upright one. Must be positive when set.
   final int? maxWidth;
 
   /// Largest output height in pixels, or null for no limit. See [maxWidth].
