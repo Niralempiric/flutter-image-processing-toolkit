@@ -98,3 +98,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# path_provider_android 2.3.x moved to JNI and throws
+# ClassNotFoundException: Landroid/content/Context; when the example calls
+# getApplicationDocumentsDirectory(), so "Compress and export" never finishes
+# (reproduced on a Pixel 7 emulator, API 35, and an OPPO CPH2337, API 34).
+# 2.2.10 works; remove this override once the upstream bug is fixed.
+dependency_overrides:
+  path_provider_android: 2.2.10
