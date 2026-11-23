@@ -4,6 +4,7 @@ import 'dart:ui' show Rect;
 import 'package:path/path.dart' as path;
 
 import '../exceptions/image_processing_exception.dart';
+import '../models/batch_item_result.dart';
 import '../models/compression_result.dart';
 import '../models/image_compression_options.dart';
 import '../models/image_output_format.dart';
@@ -269,6 +270,82 @@ class ImageCompressionService {
       );
     }
     return fitWithin(source, maxWidth: maxWidth, maxHeight: maxHeight);
+  }
+
+  /// Compresses many files, a few at a time, and reports each outcome.
+  ///
+  /// Returns one [BatchItemResult] per entry of [inputs], in the same order.
+  /// A file that fails is reported in its entry and does not stop the others,
+  /// so this only throws for a problem with the call itself: invalid
+  /// [options] or [maxConcurrent] below one, both checked before any work
+  /// starts.
+  ///
+  /// At most [maxConcurrent] files are compressed at the same time. After each
+  /// file finishes, [onProgress] is called with the number finished so far,
+  /// the total, and that file's outcome; calls arrive in completion order,
+  /// not input order. An exception thrown by [onProgress] does not stop the
+  /// batch: the remaining files are processed and the first such exception is
+  /// rethrown once every file has finished.
+  Future<List<BatchItemResult>> compressMany(
+    List<File> inputs, {
+    ImageCompressionOptions options = const ImageCompressionOptions(),
+    int maxConcurrent = 2,
+    void Function(int completed, int total, BatchItemResult latest)? onProgress,
+  }) async {
+    _validateOptions(options);
+    if (maxConcurrent < 1) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'maxConcurrent must be at least 1.',
+      );
+    }
+    final total = inputs.length;
+    final results = List<BatchItemResult?>.filled(total, null);
+    var next = 0;
+    var completed = 0;
+    Object? callbackError;
+    StackTrace? callbackStack;
+
+    Future<void> worker() async {
+      while (next < total) {
+        final index = next++;
+        final input = inputs[index];
+        BatchItemResult outcome;
+        try {
+          outcome = BatchItemResult.success(
+            input,
+            await compress(input, options: options),
+          );
+        } on ImageProcessingException catch (error) {
+          outcome = BatchItemResult.failure(input, error);
+        } catch (error) {
+          outcome = BatchItemResult.failure(
+            input,
+            ImageProcessingException(
+              ImageProcessingErrorCode.compressionFailed,
+              'Unable to compress the image.',
+              cause: error,
+            ),
+          );
+        }
+        results[index] = outcome;
+        completed++;
+        try {
+          onProgress?.call(completed, total, outcome);
+        } catch (error, stack) {
+          callbackError ??= error;
+          callbackStack ??= stack;
+        }
+      }
+    }
+
+    await Future.wait([
+      for (var i = 0; i < maxConcurrent && i < total; i++) worker(),
+    ]);
+    if (callbackError != null) {
+      Error.throwWithStackTrace(callbackError!, callbackStack!);
+    }
+    return List<BatchItemResult>.unmodifiable(results);
   }
 
   Future<int> _validateInput(File input) async {

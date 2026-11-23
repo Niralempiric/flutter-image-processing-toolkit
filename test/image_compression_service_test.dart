@@ -1074,6 +1074,182 @@ void main() {
       expect(await original.readAsBytes(), [1, 2, 3]);
     });
   });
+
+  group('compressMany', () {
+    Future<List<File>> photos(int count) => Future.wait([
+      for (var i = 0; i < count; i++)
+        _write(sandbox, 'photo$i.jpg', [1, 2, 3, i]),
+    ]);
+
+    test('returns one result per input, in input order', () async {
+      final inputs = await photos(5);
+
+      final results = await ImageCompressionService(
+        compressor: _SlowCompressor([9]),
+      ).compressMany(inputs);
+
+      expect(results.map((r) => r.input.path), inputs.map((f) => f.path));
+      expect(results.every((r) => r.isSuccess), isTrue);
+      for (final r in results) {
+        expect(await r.result!.outputFile.exists(), isTrue);
+        expect(r.error, isNull);
+      }
+    });
+
+    test('reports a failed file without stopping the others', () async {
+      final inputs = await photos(3);
+      final missing = File('${sandbox.path}/missing.jpg');
+      final mixed = [inputs[0], missing, inputs[1], inputs[2]];
+
+      final results = await ImageCompressionService(
+        compressor: _SlowCompressor([9]),
+      ).compressMany(mixed);
+
+      expect(results.map((r) => r.isSuccess), [true, false, true, true]);
+      expect(results[1].result, isNull);
+      expect(results[1].error!.code, ImageProcessingErrorCode.invalidInput);
+    });
+
+    test('turns an unexpected codec error into a failed entry', () async {
+      final inputs = await photos(2);
+
+      final results = await ImageCompressionService(
+        compressor: _ThrowingCompressor(),
+      ).compressMany(inputs);
+
+      expect(results.every((r) => !r.isSuccess), isTrue);
+      expect(
+        results.first.error!.code,
+        ImageProcessingErrorCode.compressionFailed,
+      );
+    });
+
+    test('never runs more than maxConcurrent files at once', () async {
+      for (final limit in [1, 2, 3]) {
+        final inputs = await photos(7);
+        final compressor = _SlowCompressor([9]);
+
+        await ImageCompressionService(
+          compressor: compressor,
+        ).compressMany(inputs, maxConcurrent: limit);
+
+        expect(compressor.maxInFlight, limit, reason: 'limit $limit');
+        expect(compressor.calls, 7);
+      }
+    });
+
+    test('works when maxConcurrent exceeds the number of files', () async {
+      final inputs = await photos(2);
+      final compressor = _SlowCompressor([9]);
+
+      final results = await ImageCompressionService(
+        compressor: compressor,
+      ).compressMany(inputs, maxConcurrent: 10);
+
+      expect(results, hasLength(2));
+      expect(compressor.maxInFlight, 2);
+    });
+
+    test('reports progress after each file with a running count', () async {
+      final inputs = await photos(4);
+      final seen = <(int, int, String)>[];
+
+      await ImageCompressionService(
+        compressor: _SlowCompressor([9]),
+      ).compressMany(
+        inputs,
+        onProgress: (done, total, latest) =>
+            seen.add((done, total, latest.input.path)),
+      );
+
+      expect(seen.map((e) => e.$1), [1, 2, 3, 4]);
+      expect(seen.every((e) => e.$2 == 4), isTrue);
+      expect(seen.map((e) => e.$3).toSet(), inputs.map((f) => f.path).toSet());
+    });
+
+    test('progress includes failed files', () async {
+      final inputs = await photos(1);
+      final failures = <bool>[];
+
+      await ImageCompressionService(
+        compressor: _SlowCompressor([9]),
+      ).compressMany([
+        File('${sandbox.path}/missing.jpg'),
+        ...inputs,
+      ], onProgress: (_, _, latest) => failures.add(!latest.isSuccess));
+
+      expect(failures, unorderedEquals([false, true]));
+    });
+
+    test('an empty list returns an empty list and no progress', () async {
+      var calls = 0;
+
+      final results = await ImageCompressionService(
+        compressor: _SlowCompressor([9]),
+      ).compressMany(const [], onProgress: (_, _, _) => calls++);
+
+      expect(results, isEmpty);
+      expect(calls, 0);
+    });
+
+    test('rejects a bad call before processing anything', () async {
+      final inputs = await photos(2);
+      final compressor = _SlowCompressor([9]);
+      final service = ImageCompressionService(compressor: compressor);
+
+      await expectLater(
+        service.compressMany(inputs, maxConcurrent: 0),
+        throwsA(
+          isA<ImageProcessingException>().having(
+            (error) => error.code,
+            'code',
+            ImageProcessingErrorCode.invalidInput,
+          ),
+        ),
+      );
+      await expectLater(
+        service.compressMany(
+          inputs,
+          options: const ImageCompressionOptions(quality: 101),
+        ),
+        throwsA(isA<ImageProcessingException>()),
+      );
+      expect(compressor.calls, 0);
+    });
+
+    test('a throwing progress callback does not stop the batch', () async {
+      final inputs = await photos(4);
+      final compressor = _SlowCompressor([9]);
+
+      await expectLater(
+        ImageCompressionService(compressor: compressor).compressMany(
+          inputs,
+          onProgress: (done, _, _) {
+            if (done == 1) throw StateError('callback failed');
+          },
+        ),
+        throwsStateError,
+      );
+
+      expect(compressor.calls, 4);
+    });
+
+    test('applies the same options to every file', () async {
+      final inputs = await photos(3);
+      final compressor = _SlowCompressor([9]);
+
+      await ImageCompressionService(compressor: compressor).compressMany(
+        inputs,
+        options: const ImageCompressionOptions(
+          quality: 33,
+          outputFormat: ImageOutputFormat.webp,
+        ),
+      );
+
+      expect(compressor.qualities, [33, 33, 33]);
+      expect(compressor.formats.toSet(), {ImageOutputFormat.webp});
+    });
+  });
 }
 
 Future<File> _write(Directory directory, String name, List<int> bytes) async {
@@ -1378,6 +1554,39 @@ class _HeicUnavailableCompressor implements ImageCompressor {
       throw StateError('HEIC encoding is not available');
     }
     await File(outputPath).writeAsBytes(bytes);
+    return outputPath;
+  }
+}
+
+/// Takes a moment per file and records how many run at once.
+class _SlowCompressor implements ImageCompressor {
+  _SlowCompressor(this.bytes);
+
+  final List<int> bytes;
+  int calls = 0;
+  int _inFlight = 0;
+  int maxInFlight = 0;
+  final qualities = <int>[];
+  final formats = <ImageOutputFormat>[];
+
+  @override
+  Future<String?> compress({
+    required String inputPath,
+    required String outputPath,
+    required int quality,
+    required ImageOutputFormat format,
+    int? targetWidth,
+    int? targetHeight,
+    bool keepExif = false,
+  }) async {
+    calls++;
+    qualities.add(quality);
+    formats.add(format);
+    _inFlight++;
+    if (_inFlight > maxInFlight) maxInFlight = _inFlight;
+    await Future<void>.delayed(const Duration(milliseconds: 15));
+    await File(outputPath).writeAsBytes(bytes);
+    _inFlight--;
     return outputPath;
   }
 }
