@@ -137,6 +137,113 @@ void main() {
     });
   });
 
+  group('crop', () {
+    Future<CompressionResult> crop(
+      File source,
+      ui.Rect rect, {
+      int? maxWidth,
+      ImageOutputFormat? format,
+    }) => ImageCompressionService().compress(
+      source,
+      options: ImageCompressionOptions(
+        quality: 80,
+        cropRect: rect,
+        maxWidth: maxWidth,
+        outputFormat: format,
+        outputDirectory: Directory('${workspace.path}/exports'),
+      ),
+    );
+
+    testWidgets('cuts out the requested part of the image', (tester) async {
+      // 400x200 diagonal gradient: blue at the top left, green at the bottom
+      // right.
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _wideFixtureAsset,
+      );
+
+      final topLeft = await crop(source, const ui.Rect.fromLTRB(0, 0, 100, 50));
+      final bottomRight = await crop(
+        source,
+        const ui.Rect.fromLTRB(300, 150, 400, 200),
+      );
+
+      expect((topLeft.outputWidth, topLeft.outputHeight), (100, 50));
+      expect((bottomRight.outputWidth, bottomRight.outputHeight), (100, 50));
+      final blue = (await _decode(topLeft.outputFile)).centre;
+      final green = (await _decode(bottomRight.outputFile)).centre;
+      expect(blue.blue, greaterThan(blue.green));
+      expect(green.green, greaterThan(green.blue));
+      // The source is untouched and the crop is a separate file.
+      expect(await source.exists(), isTrue);
+      expect(topLeft.outputFile.path, isNot(source.path));
+    });
+
+    testWidgets('uses coordinates of the displayed image', (tester) async {
+      // Stored 400x200 with EXIF orientation 6, displayed 200x400 with blue at
+      // the top and green at the bottom.
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _rotatedFixtureAsset,
+      );
+
+      final top = await crop(source, const ui.Rect.fromLTRB(0, 0, 200, 100));
+      final bottom = await crop(
+        source,
+        const ui.Rect.fromLTRB(0, 300, 200, 400),
+      );
+
+      expect((top.outputWidth, top.outputHeight), (200, 100));
+      expect((bottom.outputWidth, bottom.outputHeight), (200, 100));
+      // The gradient reaches green about a quarter of the way down, so read
+      // the top row of the top crop, where it is still clearly blue.
+      final blue = (await _decode(top.outputFile)).top;
+      final green = (await _decode(bottom.outputFile)).centre;
+      expect(blue.blue, greaterThan(blue.green));
+      expect(green.green, greaterThan(green.blue));
+    });
+
+    testWidgets('resizes the cropped image, and can change its format', (
+      tester,
+    ) async {
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _wideFixtureAsset,
+      );
+
+      final result = await crop(
+        source,
+        const ui.Rect.fromLTRB(0, 0, 200, 100),
+        maxWidth: 100,
+        format: ImageOutputFormat.webp,
+      );
+
+      expect((result.outputWidth, result.outputHeight), (100, 50));
+      expect(result.outputFormat, ImageOutputFormat.webp);
+      expect(result.outputFile.path, endsWith('.webp'));
+    });
+
+    testWidgets('rejects a rectangle outside the image', (tester) async {
+      final source = await _copyFixtureInto(
+        workspace,
+        asset: _wideFixtureAsset,
+      );
+      final exports = Directory('${workspace.path}/exports');
+
+      await expectLater(
+        crop(source, const ui.Rect.fromLTRB(0, 0, 500, 100)),
+        throwsA(
+          isA<ImageProcessingException>().having(
+            (error) => error.code,
+            'code',
+            ImageProcessingErrorCode.invalidInput,
+          ),
+        ),
+      );
+      expect(exports.existsSync() && exports.listSync().isNotEmpty, isFalse);
+    });
+  });
+
   group('EXIF orientation', () {
     testWidgets('bakes the rotation into the output pixels', (tester) async {
       final source = await _copyFixtureInto(
@@ -280,6 +387,7 @@ typedef _Decoded = ({
   int height,
   ({int blue, int green}) top,
   ({int blue, int green}) bottom,
+  ({int blue, int green}) centre,
 });
 
 Future<_Decoded> _decode(File file) async {
@@ -296,6 +404,7 @@ Future<_Decoded> _decode(File file) async {
     height: image.height,
     top: colorAt(1),
     bottom: colorAt(image.height - 2),
+    centre: colorAt(image.height ~/ 2),
   );
 }
 

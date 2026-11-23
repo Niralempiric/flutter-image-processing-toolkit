@@ -67,6 +67,20 @@ final result = await compressor.compress(
 
 `keepExif: true` alone keeps the location too. `stripLocation` works for JPEG output only, and if the location cannot be removed the call throws and leaves no file rather than writing one that still contains it. See [Privacy and metadata](#privacy-and-metadata).
 
+To keep only part of an image, set `cropRect`. The rectangle is in pixels of the image as displayed (after EXIF orientation), with the origin at the top left, and must lie inside the image:
+
+```dart
+final result = await compressor.compress(
+  File('/path/to/photo.jpg'),
+  options: const ImageCompressionOptions(
+    cropRect: Rect.fromLTWH(100, 50, 800, 600),
+    maxWidth: 400, // resizing and quality apply to the cropped image
+  ),
+);
+```
+
+A rectangle that is empty, partly outside the image, or not finite fails with `invalidInput` before anything is written. Edges are rounded to the nearest pixel. The source file is never changed. See [Cropping](#cropping) for the details.
+
 Omit `outputFormat` to use the supported source format. Omit `outputDirectory` to create a `compressed_images` directory beside the input. Catch `ImageProcessingException` and inspect its `code` (`invalidInput`, `unsupportedFormat`, or `compressionFailed`).
 
 ## API
@@ -74,6 +88,16 @@ Omit `outputFormat` to use the supported source format. Omit `outputDirectory` t
 `ImageCompressionService.compress(File, {ImageCompressionOptions options})` returns a `Future<CompressionResult>`.
 
 `CompressionResult` provides `originalFile`, `outputFile`, `originalSizeBytes`, `compressedSizeBytes`, `outputFormat`, `outputWidth`, `outputHeight`, and `compressionPercentage`. `outputWidth` and `outputHeight` are null when the output's dimensions cannot be read, for example a HEIC file on an engine that cannot decode it. The percentage is clamped to 0–100: an output that is larger than its source reports `0% saved` rather than a misleading negative value.
+
+## Cropping
+
+Cropping happens before resizing and compression, so `maxWidth`, `maxHeight`, `quality` and `outputFormat` apply to the cropped image, and `result.originalSizeBytes` is still the size of the source file.
+
+- The crop goes through a temporary lossless PNG, so the image is encoded lossily only once, in the output format. The temporary file is deleted afterwards, also when the operation fails.
+- The whole source is decoded into memory to crop it, roughly four bytes per pixel, so a very large photo needs a lot of memory while it is cropped.
+- The cropped image does not carry the source's metadata, so `cropRect` cannot be combined with `keepExif` (it fails with `invalidInput`).
+- Cropping needs a source Flutter can decode. A source it cannot (some HEIC files) fails with `compressionFailed`.
+- Checked on Android (API 35) with a real codec, including a photo stored rotated: the rectangle follows the displayed image. iOS is not verified.
 
 ## Privacy and metadata
 

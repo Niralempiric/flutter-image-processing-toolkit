@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Rect;
 
 import 'image_output_format.dart';
 
@@ -16,6 +17,7 @@ class ImageCompressionOptions {
     this.maxHeight,
     this.keepExif = false,
     this.stripLocation = false,
+    this.cropRect,
   });
 
   /// Codec quality, from 0 (smallest) to 100 (highest quality).
@@ -57,4 +59,17 @@ class ImageCompressionOptions {
   /// that still contains it. Other metadata that can reveal a place, such as a
   /// free-text caption, is kept.
   final bool stripLocation;
+
+  /// Part of the image to keep, or null to keep all of it.
+  ///
+  /// The rectangle is in pixels of the image as displayed, after any EXIF
+  /// orientation is applied, with the origin at the top left. Each edge is
+  /// rounded to the nearest pixel. It must be non-empty and lie inside the
+  /// image, otherwise the operation fails with `invalidInput`.
+  ///
+  /// Cropping happens before resizing and compression, so [maxWidth],
+  /// [maxHeight], [quality] and [outputFormat] apply to the cropped image.
+  /// The source file is never changed. Cannot be combined with [keepExif]:
+  /// the cropped image does not carry the source's metadata.
+  final Rect? cropRect;
 }
