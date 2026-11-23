@@ -1,5 +1,7 @@
 # Flutter Image Processing Toolkit
 
+[![Flutter checks](https://github.com/Niralempiric/flutter-image-processing-toolkit/actions/workflows/flutter.yml/badge.svg)](https://github.com/Niralempiric/flutter-image-processing-toolkit/actions/workflows/flutter.yml) ![line coverage](https://raw.githubusercontent.com/Niralempiric/flutter-image-processing-toolkit/badges/coverage.svg)
+
 A reusable Flutter package for non-destructive image compression on Android and iOS. This first release intentionally implements compression only; resizing, cropping, metadata, and camera workflows are out of scope.
 
 ## Features
@@ -182,6 +184,15 @@ flutter analyze
 flutter test
 cd example && flutter test
 ```
+
+CI runs the same checks with `flutter test --coverage`, fails if line coverage is below 80%, shows a per-file table in the job summary, and publishes the badge above from `main`. To see the table locally:
+
+```sh
+flutter test --coverage
+dart tool/coverage_summary.dart
+```
+
+Line coverage covers the host-side tests only. `native_image_compressor.dart` calls the real codec, so it is exercised by the device integration tests, which CI does not run, and shows as low here.
 
 ### Integration tests
 

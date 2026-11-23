@@ -3,8 +3,8 @@ name: Flutter checks
 on:
   push:
     branches: [main]
+  # Every pull request, not only those aimed at main, so stacked PRs are checked.
   pull_request:
-    branches: [main]
 
 jobs:
   verify:
@@ -23,12 +23,39 @@ jobs:
           flutter-version: 3.50.0
           cache: true
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test example/lib example/test example/integration_test
+      - run: dart format --output=none --set-exit-if-changed lib test tool example/lib example/test example/integration_test
       - run: flutter analyze
-      - run: flutter test
+      - run: flutter test --coverage
+      # Prints a per-file table, writes coverage/coverage.svg, appends the table
+      # to the job summary, and fails if line coverage drops below the minimum.
+      - run: dart tool/coverage_summary.dart --min 80
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage/lcov.info
+            coverage/coverage.svg
       - run: flutter pub get
         working-directory: example
       - run: flutter test
         working-directory: example
       - run: flutter build apk --debug
         working-directory: example
+
+  # Publishes the badge shown in the README. Runs only for pushes to main, and
+  # is the only job with write access.
+  coverage-badge:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: coverage
+      # The badge is cosmetic, so a failure here must not fail the build.
+      - run: tool/publish_badge.sh coverage/coverage.svg
+        continue-on-error: true
