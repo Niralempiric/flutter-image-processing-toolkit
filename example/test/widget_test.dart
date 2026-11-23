@@ -52,6 +52,75 @@ void main() {
     expect(find.text('HEIC'), findsNothing);
   });
 
+  testWidgets('selects a crop preset', (tester) async {
+    var selection = CropPreset.none;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CropPresetSelector(
+            value: selection,
+            onChanged: (preset) => selection = preset,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('No crop'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<CropPreset>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Centre square').last);
+    await tester.pump();
+
+    expect(selection, CropPreset.centreSquare);
+  });
+
+  group('cropRectFor', () {
+    const landscape = Size(400, 200);
+
+    test('is null when there is no crop', () {
+      expect(cropRectFor(CropPreset.none, landscape), isNull);
+    });
+
+    test('centres a square on the shorter side', () {
+      expect(
+        cropRectFor(CropPreset.centreSquare, landscape),
+        const Rect.fromLTWH(100, 0, 200, 200),
+      );
+      expect(
+        cropRectFor(CropPreset.centreSquare, const Size(200, 400)),
+        const Rect.fromLTWH(0, 100, 200, 200),
+      );
+    });
+
+    test('takes the middle half and the top-left quarter', () {
+      expect(
+        cropRectFor(CropPreset.centreHalf, landscape),
+        const Rect.fromLTWH(100, 50, 200, 100),
+      );
+      expect(
+        cropRectFor(CropPreset.topLeftQuarter, landscape),
+        const Rect.fromLTWH(0, 0, 200, 100),
+      );
+    });
+
+    test('every preset stays inside the image', () {
+      for (final size in const [
+        Size(400, 200),
+        Size(200, 400),
+        Size(333, 111),
+      ]) {
+        for (final preset in CropPreset.values) {
+          final rect = cropRectFor(preset, size);
+          if (rect == null) continue;
+          expect(rect.left, greaterThanOrEqualTo(0));
+          expect(rect.top, greaterThanOrEqualTo(0));
+          expect(rect.right, lessThanOrEqualTo(size.width));
+          expect(rect.bottom, lessThanOrEqualTo(size.height));
+        }
+      }
+    });
+  });
+
   group('describeCompressionFailure', () {
     const generic = ImageProcessingException(
       ImageProcessingErrorCode.compressionFailed,

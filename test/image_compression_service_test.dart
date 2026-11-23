@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter_image_processing_toolkit/flutter_image_processing_toolkit.dart';
 import 'package:flutter_image_processing_toolkit/src/compression/exif_gps.dart';
+import 'package:flutter_image_processing_toolkit/src/compression/image_cropper.dart';
 import 'package:flutter_image_processing_toolkit/src/compression/image_compressor.dart';
 import 'package:flutter_image_processing_toolkit/src/compression/resize.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -594,6 +596,315 @@ void main() {
       },
     );
   });
+
+  group('cropRect', () {
+    // The source is 400x200 as displayed. The cropped copy, which the fake
+    // cropper writes as cropped.png, is whatever size the cropper reports.
+    ImageSizeReader sizes({ImageSize cropped = (width: 200, height: 100)}) {
+      return (file) async => file.path.endsWith('cropped.png')
+          ? cropped
+          : (width: 400, height: 200);
+    }
+
+    test('crops first and hands the cropped copy to the codec', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3, 4]);
+      final cropper = _FakeCropper([5, 5, 5]);
+      final compressor = _FakeCompressor([1]);
+
+      final result =
+          await ImageCompressionService(
+            compressor: compressor,
+            imageSizeReader: sizes(),
+            imageCropper: cropper,
+          ).compress(
+            original,
+            options: const ImageCompressionOptions(
+              cropRect: ui.Rect.fromLTRB(100, 50, 300, 150),
+            ),
+          );
+
+      expect(cropper.area, (left: 100, top: 50, width: 200, height: 100));
+      expect(cropper.input!.path, original.path);
+      // The codec read the cropped data, not the original.
+      expect(compressor.inputBytes, [5, 5, 5]);
+      expect(compressor.inputPath_, isNot(original.path));
+      expect(await original.readAsBytes(), [1, 2, 3, 4]);
+      expect(result.originalFile.path, original.path);
+      expect(result.originalSizeBytes, 4);
+      expect(result.outputFormat, ImageOutputFormat.jpeg);
+      expect(result.outputFile.path, contains('photo_compressed_'));
+    });
+
+    test('removes its temporary files, on success and on failure', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final cropper = _FakeCropper([5]);
+      final service = ImageCompressionService(
+        compressor: _FakeCompressor([1]),
+        imageSizeReader: sizes(),
+        imageCropper: cropper,
+      );
+      const options = ImageCompressionOptions(
+        cropRect: ui.Rect.fromLTRB(0, 0, 10, 10),
+      );
+
+      await service.compress(original, options: options);
+      expect(cropper.scratchDirectory!.existsSync(), isFalse);
+
+      final failing = ImageCompressionService(
+        compressor: _ThrowingCompressor(),
+        imageSizeReader: sizes(),
+        imageCropper: cropper,
+      );
+      await expectLater(
+        failing.compress(original, options: options),
+        throwsA(isA<ImageProcessingException>()),
+      );
+      expect(cropper.scratchDirectory!.existsSync(), isFalse);
+    });
+
+    test('rounds the edges to whole pixels', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final cropper = _FakeCropper([5]);
+
+      await ImageCompressionService(
+        compressor: _FakeCompressor([1]),
+        imageSizeReader: sizes(),
+        imageCropper: cropper,
+      ).compress(
+        original,
+        options: const ImageCompressionOptions(
+          cropRect: ui.Rect.fromLTRB(9.6, 0.4, 59.5, 20.2),
+        ),
+      );
+
+      expect(cropper.area, (left: 10, top: 0, width: 50, height: 20));
+    });
+
+    test('rejects a rectangle outside the image or empty', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final cropper = _FakeCropper([5]);
+      final service = ImageCompressionService(
+        compressor: _FakeCompressor([1]),
+        imageSizeReader: sizes(),
+        imageCropper: cropper,
+      );
+
+      for (final rect in const [
+        ui.Rect.fromLTRB(-1, 0, 100, 100), // left of the image
+        ui.Rect.fromLTRB(0, -1, 100, 100), // above the image
+        ui.Rect.fromLTRB(0, 0, 401, 100), // wider than the image
+        ui.Rect.fromLTRB(0, 0, 100, 201), // taller than the image
+        ui.Rect.fromLTRB(50, 50, 50, 100), // no width
+        ui.Rect.fromLTRB(50, 50, 100, 50), // no height
+        ui.Rect.fromLTRB(0, 0, 100.4, 0.4), // rounds to no height
+        ui.Rect.fromLTRB(0, 0, double.infinity, 10),
+        ui.Rect.fromLTRB(0, 0, double.nan, 10),
+      ]) {
+        await expectLater(
+          service.compress(
+            original,
+            options: ImageCompressionOptions(cropRect: rect),
+          ),
+          throwsA(
+            isA<ImageProcessingException>().having(
+              (error) => error.code,
+              'code',
+              ImageProcessingErrorCode.invalidInput,
+            ),
+          ),
+          reason: '$rect',
+        );
+      }
+      expect(cropper.area, isNull, reason: 'nothing was cropped');
+    });
+
+    test('accepts a rectangle that is exactly the whole image', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final cropper = _FakeCropper([5]);
+
+      await ImageCompressionService(
+        compressor: _FakeCompressor([1]),
+        imageSizeReader: sizes(cropped: (width: 400, height: 200)),
+        imageCropper: cropper,
+      ).compress(
+        original,
+        options: const ImageCompressionOptions(
+          cropRect: ui.Rect.fromLTRB(0, 0, 400, 200),
+        ),
+      );
+
+      expect(cropper.area, (left: 0, top: 0, width: 400, height: 200));
+    });
+
+    test(
+      'a failing cropper leaves no output and reports compressionFailed',
+      () async {
+        final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+        final outputDirectory = Directory('${sandbox.path}/exports');
+
+        await expectLater(
+          ImageCompressionService(
+            compressor: _FakeCompressor([1]),
+            imageSizeReader: sizes(),
+            imageCropper: _FakeCropper([5], fail: true),
+          ).compress(
+            original,
+            options: ImageCompressionOptions(
+              cropRect: const ui.Rect.fromLTRB(0, 0, 10, 10),
+              outputDirectory: outputDirectory,
+            ),
+          ),
+          throwsA(
+            isA<ImageProcessingException>().having(
+              (error) => error.code,
+              'code',
+              ImageProcessingErrorCode.compressionFailed,
+            ),
+          ),
+        );
+        expect(outputDirectory.existsSync(), isFalse);
+      },
+    );
+
+    test('fails when the source size cannot be read', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+
+      await expectLater(
+        ImageCompressionService(
+          compressor: _FakeCompressor([1]),
+          imageSizeReader: (_) async => null,
+          imageCropper: _FakeCropper([5]),
+        ).compress(
+          original,
+          options: const ImageCompressionOptions(
+            cropRect: ui.Rect.fromLTRB(0, 0, 10, 10),
+          ),
+        ),
+        throwsA(
+          isA<ImageProcessingException>().having(
+            (error) => error.code,
+            'code',
+            ImageProcessingErrorCode.compressionFailed,
+          ),
+        ),
+      );
+    });
+
+    test('resizing applies to the cropped size', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final compressor = _FakeCompressor([1]);
+
+      await ImageCompressionService(
+        compressor: compressor,
+        imageSizeReader: sizes(),
+        imageCropper: _FakeCropper([5]),
+      ).compress(
+        original,
+        options: const ImageCompressionOptions(
+          cropRect: ui.Rect.fromLTRB(0, 0, 200, 100),
+          maxWidth: 100,
+        ),
+      );
+
+      // 200x100 scaled to a width of 100, not the 400x200 original.
+      expect(compressor.targetWidth, 100);
+      expect(compressor.targetHeight, 50);
+    });
+
+    test('cannot be combined with keepExif', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+
+      await expectLater(
+        ImageCompressionService(
+          compressor: _FakeCompressor([1]),
+          imageSizeReader: sizes(),
+          imageCropper: _FakeCropper([5]),
+        ).compress(
+          original,
+          options: const ImageCompressionOptions(
+            cropRect: ui.Rect.fromLTRB(0, 0, 10, 10),
+            keepExif: true,
+          ),
+        ),
+        throwsA(
+          isA<ImageProcessingException>().having(
+            (error) => error.code,
+            'code',
+            ImageProcessingErrorCode.invalidInput,
+          ),
+        ),
+      );
+    });
+
+    test('without cropRect the cropper is never used', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final cropper = _FakeCropper([5]);
+      final compressor = _FakeCompressor([1]);
+
+      await ImageCompressionService(
+        compressor: compressor,
+        imageCropper: cropper,
+      ).compress(original);
+
+      expect(cropper.area, isNull);
+      expect(compressor.inputPath_, original.path);
+    });
+  });
+
+  group('UiImageCropper', () {
+    test('copies exactly the requested pixels', () async {
+      // 40x20: red in the left half, blue in the right half.
+      final source = File('${sandbox.path}/halves.png');
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawRect(
+        const ui.Rect.fromLTWH(0, 0, 20, 20),
+        ui.Paint()..color = const ui.Color(0xFFFF0000),
+      );
+      canvas.drawRect(
+        const ui.Rect.fromLTWH(20, 0, 20, 20),
+        ui.Paint()..color = const ui.Color(0xFF0000FF),
+      );
+      final image = await recorder.endRecording().toImage(40, 20);
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      await source.writeAsBytes(png!.buffer.asUint8List());
+
+      // Crops [width] pixels starting at [left] and reads the colour at
+      // [sampleX] within the cropped image.
+      Future<(int, int, int)> cropAndSample(
+        int left,
+        int width,
+        int sampleX,
+      ) async {
+        final output = File('${sandbox.path}/crop_${left}_$sampleX.png');
+        await const UiImageCropper().cropToPng(
+          input: source,
+          left: left,
+          top: 0,
+          width: width,
+          height: 10,
+          output: output,
+        );
+        final decoded = (await (await ui.instantiateImageCodec(
+          await output.readAsBytes(),
+        )).getNextFrame()).image;
+        expect((decoded.width, decoded.height), (width, 10));
+        final data = (await decoded.toByteData())!;
+        final offset = ((5 * width) + sampleX) * 4;
+        return (
+          data.getUint8(offset),
+          data.getUint8(offset + 1),
+          data.getUint8(offset + 2),
+        );
+      }
+
+      expect(await cropAndSample(0, 20, 10), (255, 0, 0)); // all red
+      expect(await cropAndSample(20, 20, 10), (0, 0, 255)); // all blue
+      // x 10..30 straddles the boundary at 20: red on its left, blue on its right.
+      expect(await cropAndSample(10, 20, 2), (255, 0, 0));
+      expect(await cropAndSample(10, 20, 17), (0, 0, 255));
+    });
+  });
 }
 
 Future<File> _write(Directory directory, String name, List<int> bytes) async {
@@ -612,6 +923,8 @@ class _FakeCompressor implements ImageCompressor {
   int? targetWidth;
   int? targetHeight;
   bool? keepExif;
+  String? inputPath_;
+  List<int>? inputBytes;
 
   @override
   Future<String?> compress({
@@ -629,6 +942,8 @@ class _FakeCompressor implements ImageCompressor {
     this.targetWidth = targetWidth;
     this.targetHeight = targetHeight;
     this.keepExif = keepExif;
+    inputPath_ = inputPath;
+    inputBytes = File(inputPath).readAsBytesSync();
     await File(outputPath).writeAsBytes(bytes);
     return outputPath;
   }
@@ -840,4 +1155,31 @@ bool _containsCoordinates(Uint8List jpeg, bool littleEndian) {
     if (match) return true;
   }
   return false;
+}
+
+/// Records the area it was asked to crop and writes [bytes] as the result.
+class _FakeCropper implements ImageCropper {
+  _FakeCropper(this.bytes, {this.fail = false});
+
+  final List<int> bytes;
+  final bool fail;
+  ({int left, int top, int width, int height})? area;
+  File? input;
+  Directory? scratchDirectory;
+
+  @override
+  Future<void> cropToPng({
+    required File input,
+    required int left,
+    required int top,
+    required int width,
+    required int height,
+    required File output,
+  }) async {
+    this.input = input;
+    area = (left: left, top: top, width: width, height: height);
+    scratchDirectory = output.parent;
+    if (fail) throw StateError('decoder failed');
+    await output.writeAsBytes(bytes);
+  }
 }

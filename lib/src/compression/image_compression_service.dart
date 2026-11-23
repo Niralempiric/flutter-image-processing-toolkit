@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Rect;
 
 import 'package:path/path.dart' as path;
 
@@ -8,6 +9,7 @@ import '../models/image_compression_options.dart';
 import '../models/image_output_format.dart';
 import 'image_compressor.dart';
 import 'exif_gps.dart';
+import 'image_cropper.dart';
 import 'native_image_compressor.dart';
 import 'resize.dart';
 
@@ -16,13 +18,19 @@ class ImageCompressionService {
   ImageCompressionService({
     ImageCompressor? compressor,
     ImageSizeReader imageSizeReader = readImageSize,
+    ImageCropper imageCropper = const UiImageCropper(),
   }) : _compressor = compressor ?? const NativeImageCompressor(),
-       _readImageSize = imageSizeReader;
+       _readImageSize = imageSizeReader,
+       _cropper = imageCropper;
 
   final ImageCompressor _compressor;
   final ImageSizeReader _readImageSize;
+  final ImageCropper _cropper;
 
   /// Creates a new compressed file and leaves [input] unchanged.
+  ///
+  /// When [ImageCompressionOptions.cropRect] is set, that part of the image is
+  /// cut out first and the rest of the options apply to the cropped image.
   Future<CompressionResult> compress(
     File input, {
     ImageCompressionOptions options = const ImageCompressionOptions(),
@@ -38,7 +46,99 @@ class ImageCompressionService {
         'stripLocation with keepExif is supported for JPEG output only.',
       );
     }
-    final target = await _resizeTarget(input, options);
+    final cropRect = options.cropRect;
+    if (cropRect == null) {
+      return _compressSource(input, input, originalSize, format, options);
+    }
+    if (options.keepExif) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'keepExif cannot be combined with cropRect: the cropped image does '
+        'not carry the source metadata.',
+      );
+    }
+    final area = await _cropArea(input, cropRect);
+    final scratch = await Directory.systemTemp.createTemp(
+      'image_toolkit_crop_',
+    );
+    try {
+      final cropped = File(path.join(scratch.path, 'cropped.png'));
+      try {
+        await _cropper.cropToPng(
+          input: input,
+          left: area.left,
+          top: area.top,
+          width: area.width,
+          height: area.height,
+          output: cropped,
+        );
+      } catch (error) {
+        throw ImageProcessingException(
+          ImageProcessingErrorCode.compressionFailed,
+          'Unable to crop the image.',
+          cause: error,
+        );
+      }
+      return await _compressSource(
+        input,
+        cropped,
+        originalSize,
+        format,
+        options,
+      );
+    } finally {
+      await scratch.delete(recursive: true);
+    }
+  }
+
+  /// Validates [rect] against the displayed size of [input] and rounds it to
+  /// whole pixels.
+  Future<({int left, int top, int width, int height})> _cropArea(
+    File input,
+    Rect rect,
+  ) async {
+    if (!rect.isFinite) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'The crop rectangle must have finite coordinates.',
+      );
+    }
+    final size = await _readImageSize(input);
+    if (size == null) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.compressionFailed,
+        'Unable to read the image dimensions needed to crop it.',
+      );
+    }
+    final left = rect.left.round();
+    final top = rect.top.round();
+    final right = rect.right.round();
+    final bottom = rect.bottom.round();
+    if (left < 0 ||
+        top < 0 ||
+        right > size.width ||
+        bottom > size.height ||
+        right <= left ||
+        bottom <= top) {
+      throw ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'The crop rectangle ($left, $top)-($right, $bottom) must be '
+        'non-empty and inside the ${size.width}x${size.height} image.',
+      );
+    }
+    return (left: left, top: top, width: right - left, height: bottom - top);
+  }
+
+  /// Compresses [source], which is [input] itself or a cropped copy of it.
+  /// Results and file names refer to [input].
+  Future<CompressionResult> _compressSource(
+    File input,
+    File source,
+    int originalSize,
+    ImageOutputFormat format,
+    ImageCompressionOptions options,
+  ) async {
+    final target = await _resizeTarget(source, options);
     final outputDirectory =
         options.outputDirectory ??
         Directory(path.join(input.parent.path, 'compressed_images'));
@@ -53,7 +153,7 @@ class ImageCompressionService {
     try {
       await outputDirectory.create(recursive: true);
       final outputPathFromCodec = await _compressor.compress(
-        inputPath: input.path,
+        inputPath: source.path,
         outputPath: outputPath,
         quality: options.quality,
         format: format,
