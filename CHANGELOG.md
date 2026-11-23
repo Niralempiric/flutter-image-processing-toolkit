@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 - Added `ImageCompressionOptions.maxWidth` and `maxHeight`: scale an image down to fit inside them, keeping the aspect ratio and never upscaling. Added `CompressionResult.outputWidth` and `outputHeight`. Without the new options, behavior is unchanged.
 - Added a rotated (EXIF orientation 6) fixture and Android integration tests showing that output pixels are rotated into display orientation and that resize limits apply to the displayed size. No behavior change.
+- CI now runs `flutter test --coverage`, fails below 80% line coverage, shows a per-file table in the job summary, and publishes a coverage badge to the README from `main`. Added `tool/coverage_summary.dart` and `tool/publish_badge.sh`.
 
 ## 0.1.0
 
