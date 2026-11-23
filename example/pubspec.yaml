@@ -68,6 +68,7 @@ flutter:
   assets:
     - assets/sample_photo.jpg
     - assets/sample_wide.jpg
+    - assets/sample_rotated.jpg
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -13,3 +13,9 @@ it ships inside the example app bundle.
 `gradients` source), so it is also free of third-party attribution. Its 2:1
 aspect ratio lets the resize integration tests tell a proportional scale from
 a square crop or stretch.
+
+`sample_rotated.jpg` is `sample_wide.jpg`-style content (a horizontal blue to
+green gradient, 400x200 stored) with a hand-built EXIF segment holding only
+`Orientation = 6`, so it is displayed as 200x400 with blue at the top and green
+at the bottom. It is generated, not photographed, so it has no attribution
+requirement.
