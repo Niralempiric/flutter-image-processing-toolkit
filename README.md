@@ -43,11 +43,32 @@ print(result.outputFile.path);
 print('${result.compressionPercentage.toStringAsFixed(1)}% saved');
 ```
 
+To compress many files, use `compressMany`. It runs a few at a time, reports progress, and does not stop at a failed file:
+
+```dart
+final results = await compressor.compressMany(
+  files,
+  options: const ImageCompressionOptions(quality: 70),
+  maxConcurrent: 3, // default 2
+  onProgress: (done, total, latest) => print('$done / $total'),
+);
+
+for (final item in results) {
+  if (item.isSuccess) {
+    print('${item.input.path} -> ${item.result!.outputFile.path}');
+  } else {
+    print('${item.input.path} failed: ${item.error!.code}');
+  }
+}
+```
+
+Results come back in the same order as `files`. `onProgress` fires in completion order. Invalid `options` or a `maxConcurrent` below 1 throw before any file is processed.
+
 Omit `outputFormat` to use the supported source format. Omit `outputDirectory` to create a `compressed_images` directory beside the input. Catch `ImageProcessingException` and inspect its `code` (`invalidInput`, `unsupportedFormat`, or `compressionFailed`).
 
 ## API
 
-`ImageCompressionService.compress(File, {ImageCompressionOptions options})` returns a `Future<CompressionResult>`.
+`ImageCompressionService.compress(File, {ImageCompressionOptions options})` returns a `Future<CompressionResult>`. `compressMany(List<File>, {options, maxConcurrent, onProgress})` returns a `Future<List<BatchItemResult>>`, one entry per file with either a `result` or an `error`.
 
 `CompressionResult` provides `originalFile`, `outputFile`, `originalSizeBytes`, `compressedSizeBytes`, `outputFormat`, and `compressionPercentage`. The percentage is clamped to 0–100: an output that is larger than its source reports `0% saved` rather than a misleading negative value.
 
