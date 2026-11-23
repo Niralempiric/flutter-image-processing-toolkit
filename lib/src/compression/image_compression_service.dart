@@ -7,6 +7,7 @@ import '../models/compression_result.dart';
 import '../models/image_compression_options.dart';
 import '../models/image_output_format.dart';
 import 'image_compressor.dart';
+import 'exif_gps.dart';
 import 'native_image_compressor.dart';
 import 'resize.dart';
 
@@ -29,6 +30,14 @@ class ImageCompressionService {
     _validateOptions(options);
     final originalSize = await _validateInput(input);
     final format = options.outputFormat ?? _formatForPath(input.path);
+    if (options.keepExif &&
+        options.stripLocation &&
+        format != ImageOutputFormat.jpeg) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'stripLocation with keepExif is supported for JPEG output only.',
+      );
+    }
     final target = await _resizeTarget(input, options);
     final outputDirectory =
         options.outputDirectory ??
@@ -50,6 +59,7 @@ class ImageCompressionService {
         format: format,
         targetWidth: target?.width,
         targetHeight: target?.height,
+        keepExif: options.keepExif,
       );
       if (outputPathFromCodec == null) {
         throw const ImageProcessingException(
@@ -77,6 +87,10 @@ class ImageCompressionService {
           ImageProcessingErrorCode.compressionFailed,
           'The native codec produced an empty output file.',
         );
+      }
+      if (options.keepExif && options.stripLocation) {
+        final withoutGps = removeGpsFromJpeg(await output.readAsBytes());
+        if (withoutGps != null) await output.writeAsBytes(withoutGps);
       }
       final outputSize = await _readImageSize(output);
       return CompressionResult(

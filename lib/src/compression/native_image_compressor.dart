@@ -19,6 +19,7 @@ class NativeImageCompressor implements ImageCompressor {
     required ImageOutputFormat format,
     int? targetWidth,
     int? targetHeight,
+    bool keepExif = false,
   }) async {
     final output = await FlutterImageCompress.compressAndGetFile(
       inputPath,
@@ -29,6 +30,7 @@ class NativeImageCompressor implements ImageCompressor {
       // given, the plugin's own defaults are passed so behavior is unchanged.
       minWidth: targetWidth ?? _pluginDefaultMinWidth,
       minHeight: targetHeight ?? _pluginDefaultMinHeight,
+      keepExif: keepExif,
       format: switch (format) {
         ImageOutputFormat.jpeg => CompressFormat.jpeg,
         ImageOutputFormat.png => CompressFormat.png,

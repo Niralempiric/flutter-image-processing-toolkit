@@ -9,5 +9,6 @@ abstract interface class ImageCompressor {
     required ImageOutputFormat format,
     int? targetWidth,
     int? targetHeight,
+    bool keepExif = false,
   });
 }

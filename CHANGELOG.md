@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 - Added `ImageCompressionOptions.maxWidth` and `maxHeight`: scale an image down to fit inside them, keeping the aspect ratio and never upscaling. Added `CompressionResult.outputWidth` and `outputHeight`. Without the new options, behavior is unchanged.
 - Added a rotated (EXIF orientation 6) fixture and Android integration tests showing that output pixels are rotated into display orientation and that resize limits apply to the displayed size. No behavior change.
+- Added `ImageCompressionOptions.keepExif` and `stripLocation`. `keepExif` copies the source's EXIF metadata into JPEG output (default false, so output has no metadata, as before). `stripLocation` removes only the GPS block from kept metadata and fails closed if it cannot.
 
 ## 0.1.0
 
