@@ -45,6 +45,20 @@ print(result.outputFile.path);
 print('${result.compressionPercentage.toStringAsFixed(1)}% saved');
 ```
 
+HEIC output is not available on every device. To retry a failed HEIC request in another format, set `fallbackFormat`:
+
+```dart
+// HEIC where the device can encode it, JPEG where it cannot.
+final result = await compressor.compress(
+  File('/path/to/source.jpg'),
+  options: ImageCompressionOptions(
+    outputFormat: ImageOutputFormat.heic,
+    fallbackFormat: ImageOutputFormat.jpeg,
+  ),
+);
+if (result.usedFallbackFormat) print('HEIC unavailable, wrote JPEG');
+```
+
 To cap the dimensions, set `maxWidth`, `maxHeight`, or both. The image is scaled down to fit inside them with its aspect ratio kept, and is never upscaled:
 
 ```dart
@@ -137,8 +151,10 @@ row is claimed here.
 What this means when choosing options:
 
 - **HEIC output is not available on every Android device.** On the device above
-  the request fails with `compressionFailed` instead of falling back, so request
-  `heic` only if your app can retry with `jpeg`.
+  the request fails with `compressionFailed`. Set `fallbackFormat` (for example
+  `ImageOutputFormat.jpeg`) to have the toolkit retry once in that format; the
+  result's `outputFormat` shows what was written and `usedFallbackFormat` is
+  `true`. Without it, request `heic` only if your app can retry itself.
 - **PNG output will not shrink a photograph.** PNG is lossless, so `quality` is
   ignored and a photographic source grows. Use `jpeg` or `webp` for photographs
   and `png` only when you need lossless output.

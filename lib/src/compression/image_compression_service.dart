@@ -48,7 +48,7 @@ class ImageCompressionService {
     }
     final cropRect = options.cropRect;
     if (cropRect == null) {
-      return _compressSource(input, input, originalSize, format, options);
+      return _compressWithFallback(input, input, originalSize, format, options);
     }
     if (options.keepExif) {
       throw const ImageProcessingException(
@@ -79,7 +79,7 @@ class ImageCompressionService {
           cause: error,
         );
       }
-      return await _compressSource(
+      return await _compressWithFallback(
         input,
         cropped,
         originalSize,
@@ -129,6 +129,42 @@ class ImageCompressionService {
     return (left: left, top: top, width: right - left, height: bottom - top);
   }
 
+  /// Compresses [source] as [format]. When that is a HEIC request that fails
+  /// and [ImageCompressionOptions.fallbackFormat] is set, retries once in the
+  /// fallback format. A cropped [source] is reused for the retry.
+  Future<CompressionResult> _compressWithFallback(
+    File input,
+    File source,
+    int originalSize,
+    ImageOutputFormat format,
+    ImageCompressionOptions options,
+  ) async {
+    final fallback = options.fallbackFormat;
+    try {
+      return await _compressSource(
+        input,
+        source,
+        originalSize,
+        format,
+        options,
+      );
+    } on ImageProcessingException catch (error) {
+      final canFallBack =
+          fallback != null &&
+          format == ImageOutputFormat.heic &&
+          error.code == ImageProcessingErrorCode.compressionFailed;
+      if (!canFallBack) rethrow;
+      return _compressSource(
+        input,
+        source,
+        originalSize,
+        fallback,
+        options,
+        usedFallbackFormat: true,
+      );
+    }
+  }
+
   /// Compresses [source], which is [input] itself or a cropped copy of it.
   /// Results and file names refer to [input].
   Future<CompressionResult> _compressSource(
@@ -136,8 +172,9 @@ class ImageCompressionService {
     File source,
     int originalSize,
     ImageOutputFormat format,
-    ImageCompressionOptions options,
-  ) async {
+    ImageCompressionOptions options, {
+    bool usedFallbackFormat = false,
+  }) async {
     final target = await _resizeTarget(source, options);
     final outputDirectory =
         options.outputDirectory ??
@@ -199,6 +236,7 @@ class ImageCompressionService {
         originalSizeBytes: originalSize,
         compressedSizeBytes: compressedSize,
         outputFormat: format,
+        usedFallbackFormat: usedFallbackFormat,
         outputWidth: outputSize?.width,
         outputHeight: outputSize?.height,
       );
@@ -265,6 +303,12 @@ class ImageCompressionService {
       throw const ImageProcessingException(
         ImageProcessingErrorCode.invalidInput,
         'maxWidth and maxHeight must be positive when set.',
+      );
+    }
+    if (options.fallbackFormat == ImageOutputFormat.heic) {
+      throw const ImageProcessingException(
+        ImageProcessingErrorCode.invalidInput,
+        'fallbackFormat must be a format other than HEIC.',
       );
     }
   }

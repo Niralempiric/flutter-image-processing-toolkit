@@ -905,6 +905,175 @@ void main() {
       expect(await cropAndSample(10, 20, 17), (0, 0, 255));
     });
   });
+
+  group('fallbackFormat', () {
+    test('retries a failed HEIC request in the fallback format', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3, 4]);
+      final compressor = _HeicUnavailableCompressor([9]);
+
+      final result = await ImageCompressionService(compressor: compressor)
+          .compress(
+            original,
+            options: const ImageCompressionOptions(
+              outputFormat: ImageOutputFormat.heic,
+              fallbackFormat: ImageOutputFormat.jpeg,
+            ),
+          );
+
+      expect(compressor.requestedFormats, [
+        ImageOutputFormat.heic,
+        ImageOutputFormat.jpeg,
+      ]);
+      expect(result.outputFormat, ImageOutputFormat.jpeg);
+      expect(result.usedFallbackFormat, isTrue);
+      expect(result.outputFile.path, endsWith('.jpg'));
+      expect(await result.outputFile.exists(), isTrue);
+      expect(await original.readAsBytes(), [1, 2, 3, 4]);
+    });
+
+    test('keeps the old behavior when no fallback is requested', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final compressor = _HeicUnavailableCompressor([9]);
+
+      await expectLater(
+        ImageCompressionService(compressor: compressor).compress(
+          original,
+          options: const ImageCompressionOptions(
+            outputFormat: ImageOutputFormat.heic,
+          ),
+        ),
+        throwsA(
+          isA<ImageProcessingException>().having(
+            (error) => error.code,
+            'code',
+            ImageProcessingErrorCode.compressionFailed,
+          ),
+        ),
+      );
+      expect(compressor.requestedFormats, [ImageOutputFormat.heic]);
+    });
+
+    test('is not used when the HEIC request succeeds', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final compressor = _FakeCompressor([1]);
+
+      final result = await ImageCompressionService(compressor: compressor)
+          .compress(
+            original,
+            options: const ImageCompressionOptions(
+              outputFormat: ImageOutputFormat.heic,
+              fallbackFormat: ImageOutputFormat.jpeg,
+            ),
+          );
+
+      expect(result.outputFormat, ImageOutputFormat.heic);
+      expect(result.usedFallbackFormat, isFalse);
+    });
+
+    test('does not retry failures of non-HEIC requests', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+
+      await expectLater(
+        ImageCompressionService(compressor: _ThrowingCompressor()).compress(
+          original,
+          options: const ImageCompressionOptions(
+            outputFormat: ImageOutputFormat.webp,
+            fallbackFormat: ImageOutputFormat.jpeg,
+          ),
+        ),
+        throwsA(isA<ImageProcessingException>()),
+      );
+    });
+
+    test('retries a source-format HEIC file that cannot be encoded', () async {
+      final original = await _write(sandbox, 'photo.heic', [1, 2, 3]);
+      final compressor = _HeicUnavailableCompressor([9]);
+
+      final result = await ImageCompressionService(compressor: compressor)
+          .compress(
+            original,
+            options: const ImageCompressionOptions(
+              fallbackFormat: ImageOutputFormat.webp,
+            ),
+          );
+
+      expect(result.outputFormat, ImageOutputFormat.webp);
+      expect(result.usedFallbackFormat, isTrue);
+    });
+
+    test('reuses the cropped copy when a crop is requested too', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3, 4]);
+      final compressor = _HeicUnavailableCompressor([9]);
+      final cropper = _FakeCropper([5, 5]);
+
+      final result =
+          await ImageCompressionService(
+            compressor: compressor,
+            imageSizeReader: (_) async => (width: 400, height: 200),
+            imageCropper: cropper,
+          ).compress(
+            original,
+            options: const ImageCompressionOptions(
+              outputFormat: ImageOutputFormat.heic,
+              fallbackFormat: ImageOutputFormat.jpeg,
+              cropRect: ui.Rect.fromLTRB(0, 0, 100, 100),
+            ),
+          );
+
+      expect(compressor.requestedFormats, [
+        ImageOutputFormat.heic,
+        ImageOutputFormat.jpeg,
+      ]);
+      // Both attempts read the same cropped copy, which was cut once.
+      expect(compressor.inputPaths.toSet(), hasLength(1));
+      expect(compressor.inputPaths.first, isNot(original.path));
+      expect(result.usedFallbackFormat, isTrue);
+      expect(result.outputFormat, ImageOutputFormat.jpeg);
+      expect(cropper.scratchDirectory!.existsSync(), isFalse);
+    });
+
+    test('rejects HEIC as the fallback format', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+
+      await expectLater(
+        ImageCompressionService(compressor: _FakeCompressor([1])).compress(
+          original,
+          options: const ImageCompressionOptions(
+            fallbackFormat: ImageOutputFormat.heic,
+          ),
+        ),
+        throwsA(
+          isA<ImageProcessingException>().having(
+            (error) => error.code,
+            'code',
+            ImageProcessingErrorCode.invalidInput,
+          ),
+        ),
+      );
+    });
+
+    test('leaves no files behind when the fallback also fails', () async {
+      final original = await _write(sandbox, 'photo.jpg', [1, 2, 3]);
+      final outputDirectory = Directory('${sandbox.path}/exports');
+
+      await expectLater(
+        ImageCompressionService(
+          compressor: _PartialWriteThenNullCompressor(),
+        ).compress(
+          original,
+          options: ImageCompressionOptions(
+            outputFormat: ImageOutputFormat.heic,
+            fallbackFormat: ImageOutputFormat.jpeg,
+            outputDirectory: outputDirectory,
+          ),
+        ),
+        throwsA(isA<ImageProcessingException>()),
+      );
+
+      expect(outputDirectory.listSync(), isEmpty);
+      expect(await original.readAsBytes(), [1, 2, 3]);
+    });
+  });
 }
 
 Future<File> _write(Directory directory, String name, List<int> bytes) async {
@@ -1181,5 +1350,34 @@ class _FakeCropper implements ImageCropper {
     scratchDirectory = output.parent;
     if (fail) throw StateError('decoder failed');
     await output.writeAsBytes(bytes);
+  }
+}
+
+/// Fails every HEIC request the way a device without a HEIC encoder does, and
+/// writes the requested bytes for any other format.
+class _HeicUnavailableCompressor implements ImageCompressor {
+  _HeicUnavailableCompressor(this.bytes);
+
+  final List<int> bytes;
+  final requestedFormats = <ImageOutputFormat>[];
+  final inputPaths = <String>[];
+
+  @override
+  Future<String?> compress({
+    required String inputPath,
+    required String outputPath,
+    required int quality,
+    required ImageOutputFormat format,
+    int? targetWidth,
+    int? targetHeight,
+    bool keepExif = false,
+  }) async {
+    requestedFormats.add(format);
+    inputPaths.add(inputPath);
+    if (format == ImageOutputFormat.heic) {
+      throw StateError('HEIC encoding is not available');
+    }
+    await File(outputPath).writeAsBytes(bytes);
+    return outputPath;
   }
 }
